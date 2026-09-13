@@ -121,6 +121,10 @@ export function useFlowStore() {
     setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, image } : f)));
   }, []);
 
+  const updateFlowPreview = useCallback((id: string, preview: Partial<FlowItem>) => {
+    setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, ...preview, isLoadingPreview: false } : f)));
+  }, []);
+
   const replaceStoreData = useCallback(
     (newChannels: Channel[], newFlows: FlowItem[], deletedChannelIds?: string[], deletedFlowIds?: string[]) => {
       if (deletedChannelIds) saveDeletedChannelIds(deletedChannelIds);
@@ -153,6 +157,7 @@ export function useFlowStore() {
     togglePin,
     clearChannel,
     updateFlowImage,
+    updateFlowPreview,
     replaceStoreData,
     getSyncPayload,
   };

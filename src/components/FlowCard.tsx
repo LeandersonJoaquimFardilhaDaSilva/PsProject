@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link2, MessageSquare, Image as ImageIcon, ExternalLink, Copy, Trash2, Pin, Check, Plus, X } from 'lucide-react';
+import { Link2, MessageSquare, Image as ImageIcon, ExternalLink, Copy, Trash2, Pin, Check, Plus, X, Loader2 } from 'lucide-react';
 import type { FlowItem } from '@/types';
 import { getDomain, isValidImageUrl } from '@/lib/linkPreview';
 
@@ -46,6 +46,11 @@ export function FlowCard({ item, onDelete, onTogglePin, onUpdateImage }: FlowCar
           {item.siteName && (
             <span className="truncate text-xs text-white/40">· {item.siteName}</span>
           )}
+          {item.isLoadingPreview && (
+            <span className="flex items-center gap-1 rounded-full bg-[#00e5ff]/10 px-2 py-0.5 text-[10px] font-medium text-[#00e5ff]">
+              <Loader2 size={10} className="animate-spin" /> Buscando dados...
+            </span>
+          )}
           <div className="ml-auto flex gap-1 opacity-0 transition group-hover:opacity-100">
             <button
               onClick={() => onTogglePin(item.id)}
@@ -71,7 +76,14 @@ export function FlowCard({ item, onDelete, onTogglePin, onUpdateImage }: FlowCar
           </div>
         </div>
 
-        {item.type === 'link' && item.image && !editingImage && (
+        {item.type === 'link' && item.isLoadingPreview && (
+          <div className="mb-3 flex h-24 items-center justify-center gap-2.5 rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 text-xs text-[#00e5ff] animate-pulse">
+            <Loader2 size={16} className="animate-spin text-[#00e5ff]" />
+            <span className="font-medium">Buscando informações do link em segundo plano...</span>
+          </div>
+        )}
+
+        {item.type === 'link' && !item.isLoadingPreview && item.image && !editingImage && (
           <div className="mb-3 overflow-hidden rounded-xl">
             <img
               src={item.image}
@@ -83,7 +95,7 @@ export function FlowCard({ item, onDelete, onTogglePin, onUpdateImage }: FlowCar
           </div>
         )}
 
-        {item.type === 'link' && !item.image && !editingImage && (
+        {item.type === 'link' && !item.isLoadingPreview && !item.image && !editingImage && (
           <div className="mb-3 flex h-32 items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/[0.02]">
             <button
               onClick={() => setEditingImage(true)}

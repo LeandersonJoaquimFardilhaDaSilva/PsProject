@@ -140,9 +140,25 @@ export function App() {
     setNewChannelName('');
   }
 
-  function handleSendLink(url: string, title: string, description: string, image: string, siteName: string) {
+  function handleSendLink(
+    url: string,
+    title: string,
+    description: string,
+    image: string,
+    siteName: string,
+    isLoadingPreview?: boolean
+  ) {
     if (!activeChannel) return;
-    store.addFlow({ type: 'link', channelId: activeChannel.id, url, title, description, image, siteName });
+    return store.addFlow({
+      type: 'link',
+      channelId: activeChannel.id,
+      url,
+      title,
+      description,
+      image,
+      siteName,
+      isLoadingPreview,
+    });
   }
 
   function handleSendText(text: string) {
@@ -252,6 +268,7 @@ export function App() {
             <Composer
               channelId={activeChannel.id}
               onSendLink={handleSendLink}
+              onUpdateFlowPreview={store.updateFlowPreview}
               onSendText={handleSendText}
               onSendImage={handleSendImage}
             />

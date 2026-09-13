@@ -293,6 +293,26 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                                     Recomendado
                                   </span>
                                 )}
+                                {prov.id === 'oembed' && (
+                                  <span className="rounded-full bg-[#ff3e6c]/20 px-2 py-0.5 text-[10px] font-semibold text-[#ff3e6c]">
+                                    Oficial W3C
+                                  </span>
+                                )}
+                                {prov.id === 'google_favicon' && (
+                                  <span className="rounded-full bg-[#26de81]/20 px-2 py-0.5 text-[10px] font-semibold text-[#26de81]">
+                                    CDN Google
+                                  </span>
+                                )}
+                                {prov.id === 'heuristic' && (
+                                  <span className="rounded-full bg-amber-400/20 px-2 py-0.5 text-[10px] font-semibold text-amber-400">
+                                    100% Offline
+                                  </span>
+                                )}
+                                {prov.id === 'microlink' && (
+                                  <span className="rounded-full bg-purple-400/20 px-2 py-0.5 text-[10px] font-semibold text-purple-400">
+                                    Nuvem
+                                  </span>
+                                )}
                               </div>
                               <p className="text-xs text-white/50 mt-0.5 max-w-md">
                                 {prov.description}

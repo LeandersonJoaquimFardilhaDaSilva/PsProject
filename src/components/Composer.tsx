@@ -1,18 +1,32 @@
 import { useEffect, useRef, useState } from 'react';
 import { Send, Link2, MessageSquare, Image as ImageIcon, Loader2, X } from 'lucide-react';
-import type { FlowType } from '@/types';
-import { fetchLinkPreview, isUrl, normalizeUrl } from '@/lib/linkPreview';
+import type { FlowItem, FlowType } from '@/types';
+import { fetchLinkPreview, isUrl, normalizeUrl, getDomain } from '@/lib/linkPreview';
 
 interface ComposerProps {
   channelId: string;
-  onSendLink: (url: string, title: string, description: string, image: string, siteName: string) => void;
+  onSendLink: (
+    url: string,
+    title: string,
+    description: string,
+    image: string,
+    siteName: string,
+    isLoadingPreview?: boolean
+  ) => FlowItem | void;
+  onUpdateFlowPreview?: (id: string, preview: Partial<FlowItem>) => void;
   onSendText: (text: string) => void;
   onSendImage: (imageData: string, imageName: string) => void;
 }
 
 type Mode = 'auto' | 'text';
 
-export function Composer({ channelId, onSendLink, onSendText, onSendImage }: ComposerProps) {
+export function Composer({
+  channelId,
+  onSendLink,
+  onUpdateFlowPreview,
+  onSendText,
+  onSendImage,
+}: ComposerProps) {
   const [text, setText] = useState('');
   const [mode, setMode] = useState<Mode>('auto');
   const [loading, setLoading] = useState(false);
@@ -37,12 +51,40 @@ export function Composer({ channelId, onSendLink, onSendText, onSendImage }: Com
     }
 
     if (mode === 'auto' && isUrl(value)) {
-      setLoading(true);
       const url = normalizeUrl(value);
-      const preview = await fetchLinkPreview(url);
-      setLoading(false);
-      onSendLink(url, preview.title || value, preview.description || '', preview.image || '', preview.siteName || '');
+      const domain = getDomain(url);
+
+      // 1. Limpa o campo de texto IMEDIATAMENTE (não ocupa a barra de digitação)
       setText('');
+
+      // 2. Cria o card instantaneamente com indicador de carregamento
+      const newItem = onSendLink(
+        url,
+        domain,
+        'Buscando dados do link...',
+        `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+        domain,
+        true
+      );
+
+      // 3. Processamento assíncrono em segundo plano sem travar a interface
+      if (newItem && onUpdateFlowPreview) {
+        fetchLinkPreview(url)
+          .then((preview) => {
+            onUpdateFlowPreview(newItem.id, {
+              title: preview.title || domain,
+              description: preview.description || '',
+              image: preview.image || `https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+              siteName: preview.siteName || domain,
+              isLoadingPreview: false,
+            });
+          })
+          .catch(() => {
+            onUpdateFlowPreview(newItem.id, {
+              isLoadingPreview: false,
+            });
+          });
+      }
       return;
     }
 

@@ -14,6 +14,7 @@ export interface FlowItem {
   text?: string;
   imageData?: string;
   imageName?: string;
+  isLoadingPreview?: boolean;
 }
 
 export interface Channel {

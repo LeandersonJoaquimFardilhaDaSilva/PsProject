@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Minus, Square, Copy, X, WifiOff, Search, QrCode, Menu, Settings } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import type { Channel } from '@/types';
 
 interface TitleBarProps {
@@ -25,6 +26,7 @@ export function TitleBar({
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+  const isNativeMobile = Capacitor.isNativePlatform();
 
   useEffect(() => {
     if (!window.electronAPI) return;
@@ -35,7 +37,9 @@ export function TitleBar({
 
   return (
     <div
-      className="flex select-none items-center justify-between border-b border-white/5 bg-[#0a0a0f] px-3 sm:px-4 py-2 sm:py-2.5 shrink-0"
+      className={`flex select-none items-center justify-between border-b border-white/5 bg-[#0a0a0f] px-3 sm:px-4 py-2 sm:py-2.5 shrink-0 ${
+        isNativeMobile ? 'pt-8 pb-3' : ''
+      }`}
       style={{ WebkitAppRegion: isElectron ? 'drag' : undefined } as React.CSSProperties}
     >
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
