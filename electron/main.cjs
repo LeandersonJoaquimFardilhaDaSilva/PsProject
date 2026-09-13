@@ -1,7 +1,9 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
+const { startSyncServer, getLocalIps } = require('./syncServer.cjs');
 
 let mainWindow = null;
+let syncServerInstance = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -94,7 +96,108 @@ ipcMain.handle('open-external', async (_, url) => {
   return false;
 });
 
-app.whenReady().then(() => {
+// IPC Handler para Raspagem Nativa de Links (Sem restrições de CORS no Desktop)
+ipcMain.handle('fetch-direct-html', async (_, targetUrl) => {
+  if (!targetUrl || !/^https?:\/\//i.test(targetUrl)) {
+    throw new Error('URL inválida para extração de metadados');
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    const res = await fetch(targetUrl, {
+      signal: controller.signal,
+      headers: {
+        'User-Agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 FlowApp/1.0',
+        Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+      },
+    });
+    clearTimeout(timer);
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    }
+    const html = await res.text();
+    return html;
+  } catch (err) {
+    clearTimeout(timer);
+    throw err;
+  }
+});
+
+// IPC Handlers do Servidor de Sincronização Local
+ipcMain.handle('get-sync-info', () => {
+  if (!syncServerInstance) {
+    const ips = getLocalIps();
+    return {
+      running: false,
+      port: 54321,
+      token: '',
+      ips,
+      qrData: null,
+    };
+  }
+  return {
+    running: true,
+    port: syncServerInstance.port,
+    token: syncServerInstance.token,
+    ips: syncServerInstance.ips,
+    qrData: syncServerInstance.getQrData(),
+  };
+});
+
+ipcMain.handle('regenerate-sync-token', () => {
+  if (syncServerInstance) {
+    syncServerInstance.regenerateToken();
+    return {
+      running: true,
+      port: syncServerInstance.port,
+      token: syncServerInstance.token,
+      ips: syncServerInstance.ips,
+      qrData: syncServerInstance.getQrData(),
+    };
+  }
+  return null;
+});
+
+app.whenReady().then(async () => {
+  try {
+    syncServerInstance = await startSyncServer({
+      onSyncRequest: async (payload) => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          throw new Error('Janela do aplicativo não está disponível para sincronizar');
+        }
+        return new Promise((resolve, reject) => {
+          const syncId = Math.random().toString(36).slice(2);
+          const timer = setTimeout(() => {
+            ipcMain.removeHandler(`sync-response-${syncId}`);
+            reject(new Error('Tempo limite para reconciliação no desktop esgotado'));
+          }, 10000);
+
+          ipcMain.handleOnce(`sync-response-${syncId}`, (_event, mergedResult) => {
+            clearTimeout(timer);
+            resolve(mergedResult);
+          });
+
+          mainWindow.webContents.send('sync-incoming', {
+            syncId,
+            channels: payload.channels || [],
+            flows: payload.flows || [],
+            deletedChannelIds: payload.deletedChannelIds || [],
+            deletedFlowIds: payload.deletedFlowIds || [],
+          });
+        });
+      },
+      onClientConnected: (clientInfo) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('sync-client-connected', clientInfo);
+        }
+      },
+    });
+  } catch (err) {
+    console.error('Falha ao iniciar o servidor de sincronização:', err);
+  }
+
   createWindow();
 
   app.on('activate', () => {
@@ -109,3 +212,4 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+

@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { Channel, FlowItem } from '@/types';
-import { loadChannels, loadFlows, saveChannels, saveFlows, uid } from '@/lib/storage';
+import {
+  loadChannels,
+  loadFlows,
+  saveChannels,
+  saveFlows,
+  uid,
+  loadDeletedChannelIds,
+  saveDeletedChannelIds,
+  addDeletedChannelId,
+  loadDeletedFlowIds,
+  saveDeletedFlowIds,
+  addDeletedFlowId,
+} from '@/lib/storage';
 
 const CHANNEL_COLORS = [
   '#ff3e6c',
@@ -56,8 +68,19 @@ export function useFlowStore() {
   }, []);
 
   const deleteChannel = useCallback((id: string) => {
+    addDeletedChannelId(id);
     setChannels((prev) => prev.filter((c) => c.id !== id));
-    setFlows((prev) => prev.filter((f) => f.channelId !== id));
+    setFlows((prev) => {
+      const remaining: FlowItem[] = [];
+      for (const f of prev) {
+        if (f.channelId === id) {
+          addDeletedFlowId(f.id);
+        } else {
+          remaining.push(f);
+        }
+      }
+      return remaining;
+    });
   }, []);
 
   const addFlow = useCallback((flow: Omit<FlowItem, 'id' | 'createdAt' | 'pinned'>) => {
@@ -72,6 +95,7 @@ export function useFlowStore() {
   }, []);
 
   const deleteFlow = useCallback((id: string) => {
+    addDeletedFlowId(id);
     setFlows((prev) => prev.filter((f) => f.id !== id));
   }, []);
 
@@ -80,12 +104,41 @@ export function useFlowStore() {
   }, []);
 
   const clearChannel = useCallback((channelId: string) => {
-    setFlows((prev) => prev.filter((f) => f.channelId !== channelId));
+    setFlows((prev) => {
+      const remaining: FlowItem[] = [];
+      for (const f of prev) {
+        if (f.channelId === channelId) {
+          addDeletedFlowId(f.id);
+        } else {
+          remaining.push(f);
+        }
+      }
+      return remaining;
+    });
   }, []);
 
   const updateFlowImage = useCallback((id: string, image: string) => {
     setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, image } : f)));
   }, []);
+
+  const replaceStoreData = useCallback(
+    (newChannels: Channel[], newFlows: FlowItem[], deletedChannelIds?: string[], deletedFlowIds?: string[]) => {
+      if (deletedChannelIds) saveDeletedChannelIds(deletedChannelIds);
+      if (deletedFlowIds) saveDeletedFlowIds(deletedFlowIds);
+      setChannels(newChannels);
+      setFlows(newFlows);
+    },
+    []
+  );
+
+  const getSyncPayload = useCallback(() => {
+    return {
+      channels,
+      flows,
+      deletedChannelIds: loadDeletedChannelIds(),
+      deletedFlowIds: loadDeletedFlowIds(),
+    };
+  }, [channels, flows]);
 
   return {
     channels,
@@ -100,5 +153,7 @@ export function useFlowStore() {
     togglePin,
     clearChannel,
     updateFlowImage,
+    replaceStoreData,
+    getSyncPayload,
   };
 }

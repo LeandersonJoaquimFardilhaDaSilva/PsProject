@@ -1,8 +1,103 @@
+import { Capacitor } from '@capacitor/core';
+
 export interface LinkPreview {
   title?: string;
   description?: string;
   image?: string;
   siteName?: string;
+}
+
+export type PreviewProviderId = 'native' | 'microlink' | 'urlmeta' | 'cors_proxy';
+
+export interface PreviewProviderConfig {
+  id: PreviewProviderId;
+  name: string;
+  description: string;
+  enabled: boolean;
+  timeoutMs: number;
+}
+
+export interface PreviewSettings {
+  providers: PreviewProviderConfig[];
+}
+
+export interface ProviderTestResult {
+  providerId: PreviewProviderId;
+  providerName: string;
+  success: boolean;
+  durationMs: number;
+  data?: LinkPreview;
+  error?: string;
+}
+
+export const DEFAULT_PREVIEW_PROVIDERS: PreviewProviderConfig[] = [
+  {
+    id: 'native',
+    name: 'Nativo Direto (Electron Node.js / CapacitorHttp)',
+    description: 'Download direto do HTML pelo processo nativo sem intermediários públicos, com parsing local de meta tags.',
+    enabled: true,
+    timeoutMs: 8000,
+  },
+  {
+    id: 'microlink',
+    name: 'Microlink API',
+    description: 'Serviço em nuvem da api.microlink.io que processa a página e extrai metadados estruturados.',
+    enabled: true,
+    timeoutMs: 8000,
+  },
+  {
+    id: 'urlmeta',
+    name: 'Urlmeta API',
+    description: 'Serviço gratuito api.urlmeta.org para extração rápida de OpenGraph e Twitter Cards.',
+    enabled: true,
+    timeoutMs: 8000,
+  },
+  {
+    id: 'cors_proxy',
+    name: 'Proxy AllOrigins + Parser Local',
+    description: 'Usa o proxy público allorigins.win como contingência e analisa as tags HTML no cliente.',
+    enabled: true,
+    timeoutMs: 10000,
+  },
+];
+
+const PREVIEW_SETTINGS_KEY = 'flow_settings_preview';
+
+export function getDefaultPreviewSettings(): PreviewSettings {
+  return {
+    providers: JSON.parse(JSON.stringify(DEFAULT_PREVIEW_PROVIDERS)),
+  };
+}
+
+export function loadPreviewSettings(): PreviewSettings {
+  try {
+    const raw = localStorage.getItem(PREVIEW_SETTINGS_KEY);
+    if (!raw) return getDefaultPreviewSettings();
+    const parsed: PreviewSettings = JSON.parse(raw);
+    if (!Array.isArray(parsed.providers) || parsed.providers.length === 0) {
+      return getDefaultPreviewSettings();
+    }
+
+    // Garantir que novos provedores que venham a existir sejam mesclados
+    const existingIds = new Set(parsed.providers.map((p) => p.id));
+    const mergedProviders = [...parsed.providers];
+    for (const def of DEFAULT_PREVIEW_PROVIDERS) {
+      if (!existingIds.has(def.id)) {
+        mergedProviders.push(def);
+      }
+    }
+    return { providers: mergedProviders };
+  } catch {
+    return getDefaultPreviewSettings();
+  }
+}
+
+export function savePreviewSettings(settings: PreviewSettings): void {
+  try {
+    localStorage.setItem(PREVIEW_SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // Storage indisponível
+  }
 }
 
 const URL_REGEX = /^https?:\/\/[^\s]+$/i;
@@ -25,26 +120,71 @@ export function getDomain(url: string): string {
   }
 }
 
-function isImageUrl(url: string): boolean {
-  return /\.(png|jpe?g|gif|webp|svg|bmp|ico)(\?.*)?$/i.test(url);
-}
-
 async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  const controller = new Promise<never>((_, reject) =>
-    setTimeout(() => reject(new Error('timeout')), ms)
-  );
-  return Promise.race([promise, controller]) as Promise<T>;
+  let timer: any;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`Tempo limite de ${ms}ms esgotado`)), ms);
+  });
+  try {
+    return await Promise.race([promise, timeoutPromise]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
-// Method 1: Microlink
-async function tryMicrolink(url: string): Promise<LinkPreview> {
+// Método 1: Nativo Direto (Electron Node.js ou Android CapacitorHttp)
+export async function tryNativeScraper(url: string, timeoutMs = 8000): Promise<LinkPreview> {
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.fetchDirectHtml);
+  const isNativeMobile = Capacitor.isNativePlatform();
+
+  let html = '';
+
+  if (isElectron && window.electronAPI?.fetchDirectHtml) {
+    // Desktop: Executa no processo Node.js principal sem CORS
+    html = await withTimeout(window.electronAPI.fetchDirectHtml(url), timeoutMs);
+  } else if (isNativeMobile) {
+    // Mobile: Executa pelo CapacitorHttp nativo do Android
+    const res = await withTimeout(
+      fetch(url, {
+        headers: {
+          'User-Agent':
+            'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 FlowApp/1.0',
+          Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        },
+      }),
+      timeoutMs
+    );
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    html = await res.text();
+  } else {
+    // Web padrão: Tentativa direta com fetch
+    const res = await withTimeout(fetch(url), timeoutMs);
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    html = await res.text();
+  }
+
+  if (!html || html.length < 50) {
+    throw new Error('Conteúdo HTML vazio ou insuficiente');
+  }
+
+  const preview = parseMetaTags(html, url);
+  if (!preview.title && !preview.image) {
+    throw new Error('Nenhuma meta tag OpenGraph ou título encontrado na página');
+  }
+  return preview;
+}
+
+// Método 2: Microlink API
+export async function tryMicrolink(url: string, timeoutMs = 8000): Promise<LinkPreview> {
   const res = await withTimeout(
     fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`),
-    8000
+    timeoutMs
   );
-  if (!res.ok) throw new Error('microlink failed');
+  if (!res.ok) throw new Error(`Microlink falhou com status HTTP ${res.status}`);
   const json = await res.json();
-  if (json.status !== 'success') throw new Error('microlink no success');
+  if (json.status !== 'success') {
+    throw new Error(json.message || 'Microlink não retornou status de sucesso');
+  }
   const data = json.data ?? {};
   return {
     title: data.title || undefined,
@@ -54,15 +194,17 @@ async function tryMicrolink(url: string): Promise<LinkPreview> {
   };
 }
 
-// Method 2: urlmeta.org
-async function tryUrlmeta(url: string): Promise<LinkPreview> {
+// Método 3: Urlmeta API
+export async function tryUrlmeta(url: string, timeoutMs = 8000): Promise<LinkPreview> {
   const res = await withTimeout(
     fetch(`https://api.urlmeta.org/?url=${encodeURIComponent(url)}`),
-    8000
+    timeoutMs
   );
-  if (!res.ok) throw new Error('urlmeta failed');
+  if (!res.ok) throw new Error(`Urlmeta falhou com status HTTP ${res.status}`);
   const json = await res.json();
-  if (json.meta?.status !== 'OK') throw new Error('urlmeta no ok');
+  if (json.meta?.status !== 'OK') {
+    throw new Error(json.meta?.message || 'Urlmeta não retornou status OK');
+  }
   const m = json.meta;
   return {
     title: m.title || undefined,
@@ -72,20 +214,22 @@ async function tryUrlmeta(url: string): Promise<LinkPreview> {
   };
 }
 
-// Method 3: CORS proxy + local meta tag parsing
-async function tryCorsProxy(url: string): Promise<LinkPreview> {
+// Método 4: Proxy CORS AllOrigins + Parser Local
+export async function tryCorsProxy(url: string, timeoutMs = 10000): Promise<LinkPreview> {
   const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-  const res = await withTimeout(fetch(proxyUrl), 10000);
-  if (!res.ok) throw new Error('proxy failed');
+  const res = await withTimeout(fetch(proxyUrl), timeoutMs);
+  if (!res.ok) throw new Error(`Proxy AllOrigins falhou com status HTTP ${res.status}`);
   const html = await res.text();
-  if (!html || html.length < 50) throw new Error('proxy empty');
+  if (!html || html.length < 50) throw new Error('Proxy retornou resposta vazia');
 
   const preview = parseMetaTags(html, url);
-  if (!preview.title && !preview.image) throw new Error('proxy no meta');
+  if (!preview.title && !preview.image) {
+    throw new Error('Nenhuma meta tag encontrada no HTML retornado pelo proxy');
+  }
   return preview;
 }
 
-function parseMetaTags(html: string, url: string): LinkPreview {
+export function parseMetaTags(html: string, url: string): LinkPreview {
   const getMeta = (names: string[]): string | undefined => {
     for (const name of names) {
       const re = new RegExp(
@@ -142,16 +286,84 @@ function mergePreviews(...previews: LinkPreview[]): LinkPreview {
   return merged;
 }
 
+const PROVIDER_RUNNERS: Record<
+  PreviewProviderId,
+  (url: string, timeoutMs?: number) => Promise<LinkPreview>
+> = {
+  native: tryNativeScraper,
+  microlink: tryMicrolink,
+  urlmeta: tryUrlmeta,
+  cors_proxy: tryCorsProxy,
+};
+
+/**
+ * Testa um provedor isoladamente e mede tempo de resposta e erros
+ */
+export async function testSingleProvider(
+  providerId: PreviewProviderId,
+  url: string,
+  timeoutMs = 8000
+): Promise<ProviderTestResult> {
+  const provider = DEFAULT_PREVIEW_PROVIDERS.find((p) => p.id === providerId);
+  const providerName = provider ? provider.name : providerId;
+
+  const start = performance.now();
+  const runner = PROVIDER_RUNNERS[providerId];
+  if (!runner) {
+    return {
+      providerId,
+      providerName,
+      success: false,
+      durationMs: 0,
+      error: 'Provedor não reconhecido',
+    };
+  }
+
+  try {
+    const data = await runner(url, timeoutMs);
+    const durationMs = Math.round(performance.now() - start);
+    return {
+      providerId,
+      providerName,
+      success: true,
+      durationMs,
+      data,
+    };
+  } catch (err: any) {
+    const durationMs = Math.round(performance.now() - start);
+    return {
+      providerId,
+      providerName,
+      success: false,
+      durationMs,
+      error: err.message || 'Falha desconhecida na extração',
+    };
+  }
+}
+
+/**
+ * Executa a extração completa de preview respeitando as configurações e a ordem salva
+ */
 export async function fetchLinkPreview(url: string): Promise<LinkPreview> {
+  const settings = loadPreviewSettings();
+  const activeProviders = settings.providers.filter((p) => p.enabled);
+
+  // Se nenhum estiver ativado, usa todos por segurança
+  const providersToRun = activeProviders.length > 0 ? activeProviders : DEFAULT_PREVIEW_PROVIDERS;
+
   const results: LinkPreview[] = [];
 
-  for (const method of [tryMicrolink, tryUrlmeta, tryCorsProxy]) {
+  for (const prov of providersToRun) {
+    const runner = PROVIDER_RUNNERS[prov.id];
+    if (!runner) continue;
     try {
-      const result = await method(url);
+      const result = await runner(url, prov.timeoutMs);
       results.push(result);
+      // Se já temos título e imagem, encerra a busca antecipadamente
       if (result.image && result.title) break;
-    } catch {
-      // try next method
+    } catch (err) {
+      console.warn(`[LinkPreview] Provedor ${prov.name} falhou:`, err);
+      // Passa para o próximo método configurado
     }
   }
 
