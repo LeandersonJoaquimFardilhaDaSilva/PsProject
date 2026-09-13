@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Minus, Square, Copy, X, WifiOff, Search, QrCode, Menu } from 'lucide-react';
+import { Minus, Square, Copy, X, WifiOff, Search, QrCode, Menu, Settings } from 'lucide-react';
 import type { Channel } from '@/types';
 
 interface TitleBarProps {
@@ -10,6 +10,7 @@ interface TitleBarProps {
   onOpenSync: () => void;
   syncConnected?: boolean;
   onToggleSidebar?: () => void;
+  onOpenSettings?: () => void;
 }
 
 export function TitleBar({
@@ -20,6 +21,7 @@ export function TitleBar({
   onOpenSync,
   syncConnected,
   onToggleSidebar,
+  onOpenSettings,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
@@ -102,6 +104,15 @@ export function TitleBar({
         >
           <QrCode size={12} />
           <span className="hidden xs:inline">{isElectron ? 'Celular' : 'Sync'}</span>
+        </button>
+
+        <button
+          onClick={onOpenSettings}
+          className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 sm:px-2.5 py-1 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
+          title="Configurações e opções de garimpo de dados"
+        >
+          <Settings size={12} />
+          <span className="hidden sm:inline">Config</span>
         </button>
 
         {channel && (

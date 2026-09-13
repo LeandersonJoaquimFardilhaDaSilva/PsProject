@@ -40,6 +40,7 @@ export interface ElectronAPI {
   close: () => void;
   isMaximized: () => Promise<boolean>;
   openExternal: (url: string) => Promise<boolean>;
+  fetchDirectHtml: (url: string) => Promise<string>;
   onMaximizedChange: (callback: (isMaximized: boolean) => void) => () => void;
   getSyncInfo: () => Promise<SyncServerInfo>;
   regenerateSyncToken: () => Promise<SyncServerInfo>;

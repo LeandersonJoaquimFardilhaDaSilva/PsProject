@@ -6,6 +6,7 @@ import { TitleBar } from '@/components/TitleBar';
 import { FlowCard } from '@/components/FlowCard';
 import { Composer } from '@/components/Composer';
 import { SyncModal } from '@/components/SyncModal';
+import { SettingsModal } from '@/components/SettingsModal';
 import { reconcileSyncData, loadSyncConfig, sendSyncRequestToPc, type SyncData } from '@/lib/syncEngine';
 import type { FlowFilter } from '@/types';
 
@@ -16,6 +17,7 @@ export function App() {
   const [creatingChannel, setCreatingChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
   const [syncActivity, setSyncActivity] = useState<{
     lastSyncTime?: number;
@@ -161,6 +163,7 @@ export function App() {
         search={search}
         onSearchChange={setSearch}
         onOpenSync={() => setIsSyncModalOpen(true)}
+        onOpenSettings={() => setIsSettingsModalOpen(true)}
         syncConnected={Boolean(syncActivity.lastSyncTime && (Date.now() - syncActivity.lastSyncTime < 30000))}
         onToggleSidebar={() => setIsSidebarOpenMobile((prev) => !prev)}
       />
@@ -178,6 +181,11 @@ export function App() {
             itemsCount: merged.flows.length,
           });
         }}
+      />
+
+      <SettingsModal
+        isOpen={isSettingsModalOpen}
+        onClose={() => setIsSettingsModalOpen(false)}
       />
 
       <div className="flex flex-1 overflow-hidden">

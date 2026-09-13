@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   close: () => ipcRenderer.send('window-close'),
   isMaximized: () => ipcRenderer.invoke('is-window-maximized'),
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
+  fetchDirectHtml: (url) => ipcRenderer.invoke('fetch-direct-html', url),
   onMaximizedChange: (callback) => {
     const subscription = (_event, isMaximized) => callback(isMaximized);
     ipcRenderer.on('window-maximized-change', subscription);
