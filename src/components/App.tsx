@@ -1,10 +1,12 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useFlowStore } from '@/hooks/useFlowStore';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { FlowCard } from '@/components/FlowCard';
 import { Composer } from '@/components/Composer';
+import { SyncModal } from '@/components/SyncModal';
+import { reconcileSyncData, loadSyncConfig, sendSyncRequestToPc, type SyncData } from '@/lib/syncEngine';
 import type { FlowFilter } from '@/types';
 
 export function App() {
@@ -13,6 +15,83 @@ export function App() {
   const [search, setSearch] = useState('');
   const [creatingChannel, setCreatingChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
+  const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
+  const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
+  const [syncActivity, setSyncActivity] = useState<{
+    lastSyncTime?: number;
+    lastDevice?: string;
+    itemsCount?: number;
+  }>({});
+
+  // Servidor PC: Escutar requisições de sincronização vindas do celular
+  useEffect(() => {
+    if (!window.electronAPI?.onSyncIncoming) return;
+
+    const cleanup = window.electronAPI.onSyncIncoming(async (incomingData) => {
+      const currentLocal = store.getSyncPayload();
+      const merged = reconcileSyncData(currentLocal, {
+        channels: incomingData.channels,
+        flows: incomingData.flows,
+        deletedChannelIds: incomingData.deletedChannelIds,
+        deletedFlowIds: incomingData.deletedFlowIds,
+      });
+
+      store.replaceStoreData(merged.channels, merged.flows, merged.deletedChannelIds, merged.deletedFlowIds);
+
+      // Responder para o processo principal com os dados mesclados
+      await window.electronAPI!.sendSyncResponse(incomingData.syncId, {
+        channels: merged.channels,
+        flows: merged.flows,
+        deletedChannelIds: merged.deletedChannelIds,
+        deletedFlowIds: merged.deletedFlowIds,
+      });
+
+      setSyncActivity({
+        lastSyncTime: Date.now(),
+        lastDevice: 'Celular',
+        itemsCount: merged.flows.length,
+      });
+    });
+
+    const cleanupClient = window.electronAPI.onSyncClientConnected?.((client) => {
+      setSyncActivity((prev) => ({
+        ...prev,
+        lastSyncTime: client.timestamp,
+        lastDevice: client.device,
+      }));
+    });
+
+    return () => {
+      cleanup();
+      cleanupClient?.();
+    };
+  }, [store]);
+
+  // Cliente Mobile / Web: Sincronização periódica em segundo plano se pareado
+  useEffect(() => {
+    const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+    if (isElectron) return;
+
+    const config = loadSyncConfig();
+    if (!config || !config.autoSync || !config.serverUrl) return;
+
+    const interval = setInterval(async () => {
+      try {
+        const local = store.getSyncPayload();
+        const merged = await sendSyncRequestToPc(config.serverUrl, config.token, local);
+        store.replaceStoreData(merged.channels, merged.flows, merged.deletedChannelIds, merged.deletedFlowIds);
+        setSyncActivity({
+          lastSyncTime: Date.now(),
+          lastDevice: 'PC Desktop',
+          itemsCount: merged.flows.length,
+        });
+      } catch {
+        // Dispositivo temporariamente inacessível
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [store]);
 
   const activeChannel = store.channels.find((c) => c.id === store.activeChannelId) || null;
 
@@ -81,6 +160,24 @@ export function App() {
         onClearChannel={() => activeChannel && store.clearChannel(activeChannel.id)}
         search={search}
         onSearchChange={setSearch}
+        onOpenSync={() => setIsSyncModalOpen(true)}
+        syncConnected={Boolean(syncActivity.lastSyncTime && (Date.now() - syncActivity.lastSyncTime < 30000))}
+        onToggleSidebar={() => setIsSidebarOpenMobile((prev) => !prev)}
+      />
+
+      <SyncModal
+        isOpen={isSyncModalOpen}
+        onClose={() => setIsSyncModalOpen(false)}
+        localData={store.getSyncPayload()}
+        syncActivity={syncActivity}
+        onSyncComplete={(merged) => {
+          store.replaceStoreData(merged.channels, merged.flows, merged.deletedChannelIds, merged.deletedFlowIds);
+          setSyncActivity({
+            lastSyncTime: Date.now(),
+            lastDevice: 'Celular',
+            itemsCount: merged.flows.length,
+          });
+        }}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -94,6 +191,8 @@ export function App() {
           onRenameChannel={store.renameChannel}
           onDeleteChannel={store.deleteChannel}
           onFilterChange={setFilter}
+          isOpenMobile={isSidebarOpenMobile}
+          onCloseMobile={() => setIsSidebarOpenMobile(false)}
         />
 
         <main className="flex flex-1 flex-col">

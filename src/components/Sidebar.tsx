@@ -11,6 +11,8 @@ interface SidebarProps {
   onRenameChannel: (id: string, name: string) => void;
   onDeleteChannel: (id: string) => void;
   onFilterChange: (filter: FlowFilter) => void;
+  isOpenMobile?: boolean;
+  onCloseMobile?: () => void;
 }
 
 export function Sidebar({
@@ -22,14 +24,26 @@ export function Sidebar({
   onCreateChannel,
   onDeleteChannel,
   onFilterChange,
+  isOpenMobile,
+  onCloseMobile,
 }: SidebarProps) {
-  return (
-    <aside className="flex w-64 flex-col border-r border-white/5 bg-[#0d0d12]">
-      <div className="flex items-center gap-2 px-5 py-4">
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff]">
-          <span className="text-sm font-black text-white">F</span>
+  const sidebarContent = (
+    <aside className="flex h-full w-72 md:w-64 flex-col border-r border-white/5 bg-[#0d0d12]">
+      <div className="flex items-center justify-between px-5 py-4">
+        <div className="flex items-center gap-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff]">
+            <span className="text-sm font-black text-white">F</span>
+          </div>
+          <span className="text-lg font-bold tracking-tight text-white">Flow</span>
         </div>
-        <span className="text-lg font-bold tracking-tight text-white">Flow</span>
+        {onCloseMobile && (
+          <button
+            onClick={onCloseMobile}
+            className="rounded-lg p-1 text-white/40 hover:bg-white/5 hover:text-white md:hidden"
+          >
+            <X size={18} />
+          </button>
+        )}
       </div>
 
       <div className="px-3 pb-2">
@@ -56,7 +70,10 @@ export function Sidebar({
                   className={`group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
                     isActive ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/90'
                   }`}
-                  onClick={() => onSelectChannel(channel.id)}
+                  onClick={() => {
+                    onSelectChannel(channel.id);
+                    onCloseMobile?.();
+                  }}
                 >
                   <Hash size={16} style={{ color: channel.color }} />
                   <span className="flex-1 truncate">{channel.name}</span>
@@ -91,7 +108,10 @@ export function Sidebar({
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
-              onClick={() => onFilterChange(key)}
+              onClick={() => {
+                onFilterChange(key);
+                onCloseMobile?.();
+              }}
               className={`flex flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
                 filter === key ? 'bg-white/15 text-white' : 'text-white/50 hover:bg-white/5 hover:text-white/80'
               }`}
@@ -102,5 +122,27 @@ export function Sidebar({
         </div>
       </div>
     </aside>
+  );
+
+  return (
+    <>
+      {/* Desktop permanent sidebar */}
+      <div className="hidden md:flex h-full shrink-0">
+        {sidebarContent}
+      </div>
+
+      {/* Mobile drawer overlay */}
+      {isOpenMobile && (
+        <div className="fixed inset-0 z-40 flex md:hidden">
+          <div
+            className="fixed inset-0 bg-black/60 backdrop-blur-sm transition-opacity"
+            onClick={onCloseMobile}
+          />
+          <div className="relative z-50 h-full animate-[flowIn_0.2s_ease-out]">
+            {sidebarContent}
+          </div>
+        </div>
+      )}
+    </>
   );
 }
