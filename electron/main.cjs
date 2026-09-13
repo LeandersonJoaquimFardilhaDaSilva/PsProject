@@ -237,6 +237,11 @@ ipcMain.handle('request-file-download-from-mobile', (_, { fileId, channelName, f
       channelName,
       fileName,
     });
+    return true;
+  }
+  return false;
+});
+
 ipcMain.handle('send-net-test-ping', (_, data) => {
   if (syncServerInstance?.broadcast) {
     syncServerInstance.broadcast({ type: 'net_ping', ...data });
