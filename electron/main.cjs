@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
-const { startSyncServer, getLocalIps } = require('./syncServer.cjs');
+const fs = require('fs');
+const { startSyncServer, getLocalIps, sanitizeName } = require('./syncServer.cjs');
 
 let mainWindow = null;
 let syncServerInstance = null;
@@ -160,9 +161,75 @@ ipcMain.handle('regenerate-sync-token', () => {
   return null;
 });
 
+// Handlers de Arquivos no Diretório Documents (v0.3.0)
+ipcMain.handle('get-documents-folder', () => {
+  const docs = app.getPath('documents');
+  const target = path.join(docs, 'PsProject', 'channels');
+  if (!fs.existsSync(target)) {
+    try {
+      fs.mkdirSync(target, { recursive: true });
+    } catch {
+      // Ignora
+    }
+  }
+  return target;
+});
+
+ipcMain.handle('save-file-to-documents', async (_, { channelName, fileName, bufferData }) => {
+  const docs = app.getPath('documents');
+  const safeChannel = sanitizeName(channelName || 'Geral');
+  const safeFile = sanitizeName(fileName || `arquivo_${Date.now()}`);
+  const targetDir = path.join(docs, 'PsProject', 'channels', safeChannel);
+
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  const filePath = path.join(targetDir, safeFile);
+  const buffer = Buffer.from(bufferData);
+  await fs.promises.writeFile(filePath, buffer);
+
+  return {
+    filePath,
+    fileSize: buffer.length,
+    fileName: safeFile,
+    channelName: safeChannel,
+  };
+});
+
+ipcMain.handle('open-file-location', async (_, filePath) => {
+  if (filePath && fs.existsSync(filePath)) {
+    shell.showItemInFolder(filePath);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('open-file-external', async (_, filePath) => {
+  if (filePath && fs.existsSync(filePath)) {
+    await shell.openPath(filePath);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('broadcast-sync-push', (_, data) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast(data);
+    return true;
+  }
+  return false;
+});
+
 app.whenReady().then(async () => {
   try {
     syncServerInstance = await startSyncServer({
+      documentsPath: app.getPath('documents'),
+      onFileReceived: (fileInfo) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('file-received-from-mobile', fileInfo);
+        }
+      },
       onSyncRequest: async (payload) => {
         if (!mainWindow || mainWindow.isDestroyed()) {
           throw new Error('Janela do aplicativo não está disponível para sincronizar');

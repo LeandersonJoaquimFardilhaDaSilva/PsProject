@@ -7,7 +7,18 @@ import { FlowCard } from '@/components/FlowCard';
 import { Composer } from '@/components/Composer';
 import { SyncModal } from '@/components/SyncModal';
 import { SettingsModal } from '@/components/SettingsModal';
-import { reconcileSyncData, loadSyncConfig, sendSyncRequestToPc, type SyncData } from '@/lib/syncEngine';
+import {
+  reconcileSyncData,
+  loadSyncConfig,
+  sendSyncRequestToPc,
+  WebSocketSyncClient,
+  type SyncData,
+} from '@/lib/syncEngine';
+import {
+  saveLocalFile,
+  uploadFileToPcStream,
+  formatBytes,
+} from '@/lib/fileTransferEngine';
 import type { FlowFilter } from '@/types';
 
 export function App() {
@@ -19,13 +30,17 @@ export function App() {
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
+  const [isWsConnected, setIsWsConnected] = useState(false);
   const [syncActivity, setSyncActivity] = useState<{
     lastSyncTime?: number;
     lastDevice?: string;
     itemsCount?: number;
   }>({});
 
-  // Servidor PC: Escutar requisições de sincronização vindas do celular
+  const activeChannel = store.channels.find((c) => c.id === store.activeChannelId) || null;
+  const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+
+  // 1. Servidor PC (Electron): Escutar sincronizações e arquivos vindos do celular
   useEffect(() => {
     if (!window.electronAPI?.onSyncIncoming) return;
 
@@ -38,9 +53,13 @@ export function App() {
         deletedFlowIds: incomingData.deletedFlowIds,
       });
 
-      store.replaceStoreData(merged.channels, merged.flows, merged.deletedChannelIds, merged.deletedFlowIds);
+      store.replaceStoreData(
+        merged.channels,
+        merged.flows,
+        merged.deletedChannelIds,
+        merged.deletedFlowIds
+      );
 
-      // Responder para o processo principal com os dados mesclados
       await window.electronAPI!.sendSyncResponse(incomingData.syncId, {
         channels: merged.channels,
         flows: merged.flows,
@@ -63,39 +82,79 @@ export function App() {
       }));
     });
 
+    // Notificação de arquivo recebido via Stream binário puro do celular
+    const cleanupFile = window.electronAPI.onFileReceivedFromMobile?.((fileInfo) => {
+      const targetChannel =
+        store.channels.find(
+          (c) => c.name.toLowerCase() === (fileInfo.channelName || '').toLowerCase()
+        ) ||
+        activeChannel ||
+        store.channels[0];
+
+      if (targetChannel) {
+        store.addFlow({
+          type: 'file',
+          channelId: targetChannel.id,
+          fileName: fileInfo.fileName,
+          filePath: fileInfo.filePath,
+          fileSize: fileInfo.fileSize,
+          fileType: fileInfo.fileName.split('.').pop()?.toLowerCase() || 'file',
+          transferSpeed: fileInfo.speed,
+          logs: [
+            {
+              timestamp: Date.now(),
+              level: 'success',
+              message: `Arquivo recebido via Stream binário (${fileInfo.speed})`,
+              details: `Salvo no disco em: ${fileInfo.filePath}`,
+            },
+          ],
+        });
+      }
+    });
+
     return () => {
       cleanup();
       cleanupClient?.();
+      cleanupFile?.();
     };
-  }, [store]);
+  }, [store, activeChannel]);
 
-  // Cliente Mobile / Web: Sincronização periódica em segundo plano se pareado
+  // 2. Cliente Mobile / Web: Push em Tempo Real via WebSocket (Substitui Polling)
   useEffect(() => {
-    const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
-    if (isElectron) return;
+    if (isElectron) return; // No PC, o Electron roda o servidor WebSocket
 
     const config = loadSyncConfig();
-    if (!config || !config.autoSync || !config.serverUrl) return;
+    if (!config || !config.serverUrl || !config.token) return;
 
-    const interval = setInterval(async () => {
-      try {
-        const local = store.getSyncPayload();
-        const merged = await sendSyncRequestToPc(config.serverUrl, config.token, local);
-        store.replaceStoreData(merged.channels, merged.flows, merged.deletedChannelIds, merged.deletedFlowIds);
-        setSyncActivity({
-          lastSyncTime: Date.now(),
-          lastDevice: 'PC Desktop',
-          itemsCount: merged.flows.length,
-        });
-      } catch {
-        // Dispositivo temporariamente inacessível
+    const wsClient = new WebSocketSyncClient(
+      config.serverUrl,
+      config.token,
+      (data) => {
+        if (data && (data.channels || data.flows)) {
+          const currentLocal = store.getSyncPayload();
+          const merged = reconcileSyncData(currentLocal, data);
+          store.replaceStoreData(
+            merged.channels,
+            merged.flows,
+            merged.deletedChannelIds,
+            merged.deletedFlowIds
+          );
+          setSyncActivity({
+            lastSyncTime: Date.now(),
+            lastDevice: 'PC (WebSocket)',
+            itemsCount: merged.flows.length,
+          });
+        }
+      },
+      (status) => {
+        setIsWsConnected(status === 'connected');
       }
-    }, 10000);
+    );
 
-    return () => clearInterval(interval);
-  }, [store]);
-
-  const activeChannel = store.channels.find((c) => c.id === store.activeChannelId) || null;
+    return () => {
+      wsClient.destroy();
+    };
+  }, [isElectron, store.channels.length, store.flows.length]);
 
   const flowsCount = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -108,16 +167,19 @@ export function App() {
   const visibleFlows = useMemo(() => {
     if (!activeChannel) return [];
     let items = store.flows.filter((f) => f.channelId === activeChannel.id);
-    if (filter !== 'all') items = items.filter((f) => f.type === filter);
+    if (filter !== 'all') {
+      items = items.filter((f) => f.type === filter);
+    }
     if (search.trim()) {
       const q = search.toLowerCase();
       items = items.filter(
         (f) =>
-          (f.title?.toLowerCase().includes(q)) ||
-          (f.description?.toLowerCase().includes(q)) ||
-          (f.text?.toLowerCase().includes(q)) ||
-          (f.url?.toLowerCase().includes(q)) ||
-          (f.imageName?.toLowerCase().includes(q))
+          f.text?.toLowerCase().includes(q) ||
+          f.title?.toLowerCase().includes(q) ||
+          f.description?.toLowerCase().includes(q) ||
+          f.siteName?.toLowerCase().includes(q) ||
+          f.fileName?.toLowerCase().includes(q) ||
+          f.imageName?.toLowerCase().includes(q)
       );
     }
     return [...items].sort((a, b) => {
@@ -140,6 +202,93 @@ export function App() {
     setNewChannelName('');
   }
 
+  // Envio de Arquivo Binário (PDF, EXE, DOC, etc.)
+  async function handleSendFile(file: File) {
+    if (!activeChannel) return;
+    const channelName = activeChannel.name;
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'file';
+
+    const item = store.addFlow({
+      type: 'file',
+      channelId: activeChannel.id,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: ext,
+      logs: [
+        {
+          timestamp: Date.now(),
+          level: 'info',
+          message: `Arquivo selecionado: ${file.name} (${formatBytes(file.size)})`,
+        },
+      ],
+    });
+
+    const startTime = performance.now();
+    try {
+      // 1. Salva localmente em Documents > PsProject > channels > [canal]
+      const saved = await saveLocalFile(channelName, file.name, file);
+      const durationSec = Math.max(0.001, (performance.now() - startTime) / 1000);
+      const speed = `${(file.size / (1024 * 1024) / durationSec).toFixed(2)} MB/s`;
+
+      store.addFlowLog(item.id, {
+        timestamp: Date.now(),
+        level: 'success',
+        message: `Salvo em Documents/PsProject/channels/${channelName}`,
+        details: `Caminho: ${saved.filePath} (${speed})`,
+      });
+
+      store.updateFlowPreview(item.id, {
+        filePath: saved.filePath,
+        transferSpeed: speed,
+      });
+
+      // Se estiver no Desktop, propaga via WebSocket Push para os celulares conectados
+      if (window.electronAPI?.broadcastSyncPush) {
+        window.electronAPI.broadcastSyncPush({
+          type: 'sync_data_updated',
+          data: store.getSyncPayload(),
+        });
+      }
+
+      // Se estiver no celular conectado ao PC, envia via stream binário puro (FTP-like)
+      const syncConfig = loadSyncConfig();
+      if (syncConfig && syncConfig.serverUrl && syncConfig.token) {
+        store.addFlowLog(item.id, {
+          timestamp: Date.now(),
+          level: 'info',
+          message: `Iniciando upload binário para o PC (${syncConfig.serverUrl})...`,
+        });
+
+        const uploadRes = await uploadFileToPcStream(
+          syncConfig.serverUrl,
+          syncConfig.token,
+          channelName,
+          file,
+          file.name,
+          item.id
+        );
+
+        store.addFlowLog(item.id, {
+          timestamp: Date.now(),
+          level: 'success',
+          message: `Upload concluído para o PC em ${uploadRes.durationMs}ms`,
+          details: `Velocidade: ${uploadRes.speed}`,
+        });
+
+        store.updateFlowPreview(item.id, {
+          transferSpeed: uploadRes.speed,
+        });
+      }
+    } catch (err: any) {
+      store.addFlowLog(item.id, {
+        timestamp: Date.now(),
+        level: 'error',
+        message: `Erro no processamento do arquivo: ${err.message || 'Falha desconhecida'}`,
+      });
+    }
+  }
+
+  // Envio de Link
   function handleSendLink(
     url: string,
     title: string,
@@ -149,7 +298,7 @@ export function App() {
     isLoadingPreview?: boolean
   ) {
     if (!activeChannel) return;
-    return store.addFlow({
+    const item = store.addFlow({
       type: 'link',
       channelId: activeChannel.id,
       url,
@@ -158,18 +307,75 @@ export function App() {
       image,
       siteName,
       isLoadingPreview,
+      logs: [
+        {
+          timestamp: Date.now(),
+          level: 'info',
+          message: `Link enviado: ${url}`,
+        },
+      ],
     });
+
+    if (window.electronAPI?.broadcastSyncPush) {
+      window.electronAPI.broadcastSyncPush({
+        type: 'sync_data_updated',
+        data: store.getSyncPayload(),
+      });
+    }
+
+    return item;
   }
 
+  // Envio de Texto simples
   function handleSendText(text: string) {
     if (!activeChannel) return;
-    store.addFlow({ type: 'text', channelId: activeChannel.id, text });
+    store.addFlow({
+      type: 'text',
+      channelId: activeChannel.id,
+      text,
+      logs: [
+        {
+          timestamp: Date.now(),
+          level: 'info',
+          message: `Mensagem de texto enviada (${text.length} caracteres)`,
+        },
+      ],
+    });
+
+    if (window.electronAPI?.broadcastSyncPush) {
+      window.electronAPI.broadcastSyncPush({
+        type: 'sync_data_updated',
+        data: store.getSyncPayload(),
+      });
+    }
   }
 
+  // Envio de Imagem
   function handleSendImage(imageData: string, imageName: string) {
     if (!activeChannel) return;
-    store.addFlow({ type: 'image', channelId: activeChannel.id, imageData, imageName });
+    store.addFlow({
+      type: 'image',
+      channelId: activeChannel.id,
+      imageData,
+      imageName,
+      logs: [
+        {
+          timestamp: Date.now(),
+          level: 'info',
+          message: `Imagem enviada (${imageName || 'sem nome'})`,
+        },
+      ],
+    });
+
+    if (window.electronAPI?.broadcastSyncPush) {
+      window.electronAPI.broadcastSyncPush({
+        type: 'sync_data_updated',
+        data: store.getSyncPayload(),
+      });
+    }
   }
+
+  const isWsLive = isWsConnected || (isElectron && Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 60000));
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#0a0a0f] text-white">
@@ -180,7 +386,8 @@ export function App() {
         onSearchChange={setSearch}
         onOpenSync={() => setIsSyncModalOpen(true)}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
-        syncConnected={Boolean(syncActivity.lastSyncTime && (Date.now() - syncActivity.lastSyncTime < 30000))}
+        syncConnected={Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 30000)}
+        isWebSocketActive={isWsLive}
         onToggleSidebar={() => setIsSidebarOpenMobile((prev) => !prev)}
       />
 
@@ -190,10 +397,15 @@ export function App() {
         localData={store.getSyncPayload()}
         syncActivity={syncActivity}
         onSyncComplete={(merged) => {
-          store.replaceStoreData(merged.channels, merged.flows, merged.deletedChannelIds, merged.deletedFlowIds);
+          store.replaceStoreData(
+            merged.channels,
+            merged.flows,
+            merged.deletedChannelIds,
+            merged.deletedFlowIds
+          );
           setSyncActivity({
             lastSyncTime: Date.now(),
-            lastDevice: 'Celular',
+            lastDevice: 'Dispositivo Pareado',
             itemsCount: merged.flows.length,
           });
         }}
@@ -242,10 +454,8 @@ export function App() {
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto px-6 py-6">
-            {!activeChannel && (
-              <EmptyState onCreate={handleCreateChannel} />
-            )}
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+            {!activeChannel && <EmptyState onCreate={handleCreateChannel} />}
             {activeChannel && visibleFlows.length === 0 && (
               <ChannelEmpty channelName={activeChannel.name} />
             )}
@@ -271,6 +481,7 @@ export function App() {
               onUpdateFlowPreview={store.updateFlowPreview}
               onSendText={handleSendText}
               onSendImage={handleSendImage}
+              onSendFile={handleSendFile}
             />
           )}
         </main>
@@ -287,7 +498,8 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       </div>
       <h2 className="mb-2 text-xl font-bold text-white">Bem-vindo ao Flow</h2>
       <p className="mb-6 max-w-sm text-sm text-white/50">
-        Crie canais para organizar seus links, textos e imagens por assunto. Tudo fica salvo localmente neste dispositivo.
+        Crie canais para organizar seus links, arquivos, textos e imagens por assunto. Tudo fica salvo
+        localmente neste dispositivo.
       </p>
       <button
         onClick={onCreate}
@@ -306,7 +518,9 @@ function ChannelEmpty({ channelName }: { channelName: string }) {
         <Sparkles size={24} className="text-white/40" />
       </div>
       <h3 className="mb-1 text-lg font-semibold text-white">#{channelName} está vazio</h3>
-      <p className="text-sm text-white/40">Cole um link, escreva um texto ou envie uma imagem abaixo.</p>
+      <p className="text-sm text-white/40">
+        Cole um link, escreva um texto ou envie fotos e arquivos (PDF, EXE, DOC...) abaixo.
+      </p>
     </div>
   );
 }

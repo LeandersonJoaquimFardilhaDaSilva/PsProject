@@ -10,6 +10,7 @@ interface TitleBarProps {
   onSearchChange: (value: string) => void;
   onOpenSync: () => void;
   syncConnected?: boolean;
+  isWebSocketActive?: boolean;
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
 }
@@ -21,6 +22,7 @@ export function TitleBar({
   onSearchChange,
   onOpenSync,
   syncConnected,
+  isWebSocketActive,
   onToggleSidebar,
   onOpenSettings,
 }: TitleBarProps) {
@@ -92,10 +94,26 @@ export function TitleBar({
           />
         </div>
 
-        <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#661e1e65]/20 bg-[#661e1e65]/10 px-2.5 py-1" title="Modo offline — dados salvos neste dispositivo">
-          <WifiOff size={12} className="text-[#d40000]" />
-          <span className="text-xs font-medium text-[#b40000]">Offline</span>
-        </div>
+        {isWebSocketActive ? (
+          <div
+            className="flex items-center gap-1.5 rounded-full border border-[#26de81]/30 bg-[#26de81]/15 px-2.5 py-1 text-[#26de81]"
+            title="Conectado em tempo real via WebSocket push"
+          >
+            <span className="relative flex h-2 w-2">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#26de81] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#26de81]"></span>
+            </span>
+            <span className="text-xs font-semibold">Tempo Real</span>
+          </div>
+        ) : (
+          <div
+            className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#661e1e65]/20 bg-[#661e1e65]/10 px-2.5 py-1"
+            title="Modo offline — dados salvos neste dispositivo"
+          >
+            <WifiOff size={12} className="text-[#d40000]" />
+            <span className="text-xs font-medium text-[#b40000]">Offline</span>
+          </div>
+        )}
 
         <button
           onClick={onOpenSync}

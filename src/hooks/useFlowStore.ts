@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { Channel, FlowItem } from '@/types';
+import type { Channel, FlowItem, FlowLogEntry } from '@/types';
 import {
   loadChannels,
   loadFlows,
@@ -89,9 +89,26 @@ export function useFlowStore() {
       id: uid(),
       createdAt: Date.now(),
       pinned: false,
+      logs: flow.logs || [
+        {
+          timestamp: Date.now(),
+          level: 'info',
+          message: `Item (${flow.type}) criado localmente`,
+        },
+      ],
     };
     setFlows((prev) => [...prev, item]);
     return item;
+  }, []);
+
+  const addFlowLog = useCallback((flowId: string, log: FlowLogEntry) => {
+    setFlows((prev) =>
+      prev.map((f) =>
+        f.id === flowId
+          ? { ...f, logs: [...(f.logs || []), log] }
+          : f
+      )
+    );
   }, []);
 
   const deleteFlow = useCallback((id: string) => {
@@ -158,6 +175,7 @@ export function useFlowStore() {
     clearChannel,
     updateFlowImage,
     updateFlowPreview,
+    addFlowLog,
     replaceStoreData,
     getSyncPayload,
   };

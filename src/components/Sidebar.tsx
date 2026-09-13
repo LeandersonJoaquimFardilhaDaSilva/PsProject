@@ -1,4 +1,4 @@
-import { Link2, MessageSquare, Image as ImageIcon, X, Hash } from 'lucide-react';
+import { Link2, MessageSquare, Image as ImageIcon, X, Hash, FileText } from 'lucide-react';
 import type { Channel, FlowFilter } from '@/types';
 
 interface SidebarProps {
@@ -105,6 +105,7 @@ export function Sidebar({
             { key: 'link' as const, label: '', icon: Link2 },
             { key: 'text' as const, label: '', icon: MessageSquare },
             { key: 'image' as const, label: '', icon: ImageIcon },
+            { key: 'file' as const, label: '', icon: FileText },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}

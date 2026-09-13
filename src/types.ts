@@ -1,4 +1,11 @@
-export type FlowType = 'link' | 'text' | 'image';
+export type FlowType = 'link' | 'text' | 'image' | 'file';
+
+export interface FlowLogEntry {
+  timestamp: number;
+  level: 'info' | 'warn' | 'error' | 'success';
+  message: string;
+  details?: string;
+}
 
 export interface FlowItem {
   id: string;
@@ -14,7 +21,15 @@ export interface FlowItem {
   text?: string;
   imageData?: string;
   imageName?: string;
+  // Campos para arquivos binários e FTP (v0.3.0)
+  fileName?: string;
+  filePath?: string;
+  fileSize?: number;
+  fileType?: string;
+  fileUrl?: string;
+  transferSpeed?: string;
   isLoadingPreview?: boolean;
+  logs?: FlowLogEntry[];
 }
 
 export interface Channel {
@@ -24,4 +39,4 @@ export interface Channel {
   color: string;
 }
 
-export type FlowFilter = 'all' | 'link' | 'text' | 'image';
+export type FlowFilter = 'all' | 'link' | 'text' | 'image' | 'file';

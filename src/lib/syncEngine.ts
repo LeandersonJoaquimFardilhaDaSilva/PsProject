@@ -85,12 +85,19 @@ export function reconcileSyncData(local: SyncData, incoming: SyncData): SyncData
     if (!existing) {
       flowMap.set(flow.id, flow);
     } else {
-      // Mescla atualizações (pinned, image, etc.), mantendo a versão mais atual
+      // Mescla atualizações (pinned, image, arquivos, logs, etc.), mantendo a versão mais atual
       flowMap.set(flow.id, {
         ...existing,
         ...flow,
         pinned: flow.pinned ?? existing.pinned,
         image: flow.image || existing.image,
+        fileName: flow.fileName || existing.fileName,
+        filePath: flow.filePath || existing.filePath,
+        fileSize: flow.fileSize ?? existing.fileSize,
+        fileType: flow.fileType || existing.fileType,
+        fileUrl: flow.fileUrl || existing.fileUrl,
+        transferSpeed: flow.transferSpeed || existing.transferSpeed,
+        logs: flow.logs || existing.logs,
       });
     }
   }
@@ -101,6 +108,106 @@ export function reconcileSyncData(local: SyncData, incoming: SyncData): SyncData
     deletedChannelIds: Array.from(mergedDeletedChannels),
     deletedFlowIds: Array.from(mergedDeletedFlows),
   };
+}
+
+/**
+ * Cliente WebSocket de sincronização em tempo real (Push Instantâneo)
+ * Substitui o polling HTTP e recebe atualizações do PC em milissegundos
+ */
+export class WebSocketSyncClient {
+  private ws: WebSocket | null = null;
+  private serverUrl: string;
+  private token: string;
+  private onDataUpdated: (data: any) => void;
+  private onStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void;
+  private reconnectTimer: any = null;
+  private isDestroyed = false;
+
+  constructor(
+    serverUrl: string,
+    token: string,
+    onDataUpdated: (data: any) => void,
+    onStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void
+  ) {
+    this.serverUrl = serverUrl;
+    this.token = token;
+    this.onDataUpdated = onDataUpdated;
+    this.onStatusChange = onStatusChange;
+    this.connect();
+  }
+
+  connect() {
+    if (this.isDestroyed) return;
+    try {
+      this.onStatusChange('connecting');
+      let wsUrl = this.serverUrl
+        .replace(/^http:/i, 'ws:')
+        .replace(/^https:/i, 'wss:')
+        .replace(/\/+$/, '');
+      if (!/^wss?:\/\//i.test(wsUrl)) {
+        wsUrl = `ws://${wsUrl}`;
+      }
+      const fullUrl = `${wsUrl}/ws?token=${encodeURIComponent(this.token)}`;
+
+      this.ws = new WebSocket(fullUrl);
+
+      this.ws.onopen = () => {
+        if (this.isDestroyed) return;
+        this.onStatusChange('connected');
+        console.log('[WebSocketSync] Conectado em tempo real com o PC!');
+      };
+
+      this.ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          if (msg.type === 'sync_data_updated' || msg.type === 'sync_response') {
+            this.onDataUpdated(msg.data);
+          } else if (msg.type === 'file_uploaded') {
+            this.onDataUpdated({ type: 'file_uploaded', file: msg.data });
+          }
+        } catch (err) {
+          console.error('[WebSocketSync] Erro ao ler mensagem recebida:', err);
+        }
+      };
+
+      this.ws.onclose = () => {
+        this.onStatusChange('disconnected');
+        this.scheduleReconnect();
+      };
+
+      this.ws.onerror = () => {
+        this.onStatusChange('disconnected');
+      };
+    } catch {
+      this.onStatusChange('disconnected');
+      this.scheduleReconnect();
+    }
+  }
+
+  sendSyncRequest(payload: any): boolean {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'sync_request', payload }));
+      return true;
+    }
+    return false;
+  }
+
+  scheduleReconnect() {
+    if (this.isDestroyed || this.reconnectTimer) return;
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.connect();
+    }, 3000);
+  }
+
+  destroy() {
+    this.isDestroyed = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    if (this.ws) {
+      this.ws.close();
+      this.ws = null;
+    }
+  }
 }
 
 /**

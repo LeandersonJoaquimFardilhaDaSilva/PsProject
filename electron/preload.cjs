@@ -33,4 +33,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('sync-client-connected', subscription);
     };
   },
+  // Gerenciamento de Arquivos Locais e Streaming (v0.3.0)
+  getDocumentsFolder: () => ipcRenderer.invoke('get-documents-folder'),
+  saveFileToDocuments: (data) => ipcRenderer.invoke('save-file-to-documents', data),
+  openFileLocation: (filePath) => ipcRenderer.invoke('open-file-location', filePath),
+  openFileExternal: (filePath) => ipcRenderer.invoke('open-file-external', filePath),
+  broadcastSyncPush: (data) => ipcRenderer.invoke('broadcast-sync-push', data),
+  onFileReceivedFromMobile: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('file-received-from-mobile', subscription);
+    return () => {
+      ipcRenderer.removeListener('file-received-from-mobile', subscription);
+    };
+  },
 });

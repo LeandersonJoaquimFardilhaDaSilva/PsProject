@@ -47,6 +47,18 @@ export interface ElectronAPI {
   onSyncIncoming: (callback: (data: SyncIncomingData) => void) => () => void;
   sendSyncResponse: (syncId: string, data: SyncMergedResult) => Promise<any>;
   onSyncClientConnected: (callback: (data: SyncClientInfo) => void) => () => void;
+  // Métodos de Arquivos e Streaming (v0.3.0)
+  getDocumentsFolder: () => Promise<string>;
+  saveFileToDocuments: (data: { channelName: string; fileName: string; bufferData: Uint8Array | number[] }) => Promise<{
+    filePath: string;
+    fileSize: number;
+    fileName: string;
+    channelName: string;
+  }>;
+  openFileLocation: (filePath: string) => Promise<boolean>;
+  openFileExternal: (filePath: string) => Promise<boolean>;
+  broadcastSyncPush: (data: any) => Promise<boolean>;
+  onFileReceivedFromMobile: (callback: (data: any) => void) => () => void;
 }
 
 declare global {
