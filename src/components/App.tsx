@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useFlowStore } from '@/hooks/useFlowStore';
 import { Sidebar } from '@/components/Sidebar';
@@ -18,11 +18,20 @@ import {
   saveLocalFile,
   uploadFileToPcStream,
   formatBytes,
+  registerOriginalFile,
+  getRegisteredOriginalFile,
+  downloadFileWithProgress,
+  downloadImageDirect,
+  type TransferProgress,
 } from '@/lib/fileTransferEngine';
-import type { FlowFilter } from '@/types';
+import type { FlowFilter, FlowItem } from '@/types';
 
 export function App() {
   const store = useFlowStore();
+  const storeRef = useRef(store);
+  storeRef.current = store;
+  const wsClientRef = useRef<WebSocketSyncClient | null>(null);
+
   const [filter, setFilter] = useState<FlowFilter>('all');
   const [search, setSearch] = useState('');
   const [creatingChannel, setCreatingChannel] = useState(false);
@@ -36,16 +45,40 @@ export function App() {
     lastDevice?: string;
     itemsCount?: number;
   }>({});
+  const [downloadProgressMap, setDownloadProgressMap] = useState<
+    Record<
+      string,
+      {
+        percent: number;
+        speed?: string;
+        loaded?: number;
+        total?: number;
+        isDownloading?: boolean;
+        isSuccess?: boolean;
+      }
+    >
+  >({});
 
   const activeChannel = store.channels.find((c) => c.id === store.activeChannelId) || null;
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+
+  function broadcastDataChange() {
+    if (window.electronAPI?.broadcastSyncPush) {
+      window.electronAPI.broadcastSyncPush({
+        type: 'sync_data_updated',
+        data: storeRef.current.getSyncPayload(),
+      });
+    } else {
+      wsClientRef.current?.sendSyncRequest(storeRef.current.getSyncPayload());
+    }
+  }
 
   // 1. Servidor PC (Electron): Escutar sincronizações e arquivos vindos do celular
   useEffect(() => {
     if (!window.electronAPI?.onSyncIncoming) return;
 
     const cleanup = window.electronAPI.onSyncIncoming(async (incomingData) => {
-      const currentLocal = store.getSyncPayload();
+      const currentLocal = storeRef.current.getSyncPayload();
       const merged = reconcileSyncData(currentLocal, {
         channels: incomingData.channels,
         flows: incomingData.flows,
@@ -53,7 +86,7 @@ export function App() {
         deletedFlowIds: incomingData.deletedFlowIds,
       });
 
-      store.replaceStoreData(
+      storeRef.current.replaceStoreData(
         merged.channels,
         merged.flows,
         merged.deletedChannelIds,
@@ -82,44 +115,86 @@ export function App() {
       }));
     });
 
+    // Acompanhamento de progresso de upload no PC
+    const cleanupProgress = window.electronAPI.onFileProgress?.((data) => {
+      setDownloadProgressMap((prev) => ({
+        ...prev,
+        [data.fileId]: {
+          percent: data.percent,
+          speed: data.speed,
+          loaded: data.loaded,
+          total: data.total,
+          isDownloading: data.percent < 100,
+          isSuccess: data.percent >= 100,
+        },
+      }));
+    });
+
     // Notificação de arquivo recebido via Stream binário puro do celular
     const cleanupFile = window.electronAPI.onFileReceivedFromMobile?.((fileInfo) => {
-      const targetChannel =
-        store.channels.find(
-          (c) => c.name.toLowerCase() === (fileInfo.channelName || '').toLowerCase()
-        ) ||
-        activeChannel ||
-        store.channels[0];
+      const existing = storeRef.current.flows.find(
+        (f) => f.id === fileInfo.fileId || (f.fileName === fileInfo.fileName && f.type === 'file')
+      );
 
-      if (targetChannel) {
-        store.addFlow({
-          type: 'file',
-          channelId: targetChannel.id,
-          fileName: fileInfo.fileName,
+      if (existing) {
+        storeRef.current.updateFlowPreview(existing.id, {
           filePath: fileInfo.filePath,
           fileSize: fileInfo.fileSize,
-          fileType: fileInfo.fileName.split('.').pop()?.toLowerCase() || 'file',
           transferSpeed: fileInfo.speed,
-          logs: [
-            {
-              timestamp: Date.now(),
-              level: 'success',
-              message: `Arquivo recebido via Stream binário (${fileInfo.speed})`,
-              details: `Salvo no disco em: ${fileInfo.filePath}`,
-            },
-          ],
         });
+        storeRef.current.addFlowLog(existing.id, {
+          timestamp: Date.now(),
+          level: 'success',
+          message: `Arquivo recebido e salvo no disco (${fileInfo.speed})`,
+          details: `Local: ${fileInfo.filePath}`,
+        });
+        setDownloadProgressMap((prev) => ({
+          ...prev,
+          [existing.id]: { percent: 100, isDownloading: false, isSuccess: true },
+        }));
+      } else {
+        const targetChannel =
+          storeRef.current.channels.find(
+            (c) => c.name.toLowerCase() === (fileInfo.channelName || '').toLowerCase()
+          ) ||
+          activeChannel ||
+          storeRef.current.channels[0];
+
+        if (targetChannel) {
+          const item = storeRef.current.addFlow({
+            type: 'file',
+            channelId: targetChannel.id,
+            fileName: fileInfo.fileName,
+            filePath: fileInfo.filePath,
+            fileSize: fileInfo.fileSize,
+            fileType: fileInfo.fileName.split('.').pop()?.toLowerCase() || 'file',
+            transferSpeed: fileInfo.speed,
+            logs: [
+              {
+                timestamp: Date.now(),
+                level: 'success',
+                message: `Arquivo recebido via Stream binário (${fileInfo.speed})`,
+                details: `Salvo no disco em: ${fileInfo.filePath}`,
+              },
+            ],
+          });
+          setDownloadProgressMap((prev) => ({
+            ...prev,
+            [item.id]: { percent: 100, isDownloading: false, isSuccess: true },
+          }));
+        }
       }
     });
 
     return () => {
       cleanup();
       cleanupClient?.();
+      cleanupProgress?.();
       cleanupFile?.();
     };
-  }, [store, activeChannel]);
+  }, []);
 
-  // 2. Cliente Mobile / Web: Push em Tempo Real via WebSocket (Substitui Polling)
+  // 2. Cliente Mobile / Web: Push em Tempo Real via WebSocket (Persistente e Estável)
   useEffect(() => {
     if (isElectron) return; // No PC, o Electron roda o servidor WebSocket
 
@@ -131,9 +206,9 @@ export function App() {
       config.token,
       (data) => {
         if (data && (data.channels || data.flows)) {
-          const currentLocal = store.getSyncPayload();
+          const currentLocal = storeRef.current.getSyncPayload();
           const merged = reconcileSyncData(currentLocal, data);
-          store.replaceStoreData(
+          storeRef.current.replaceStoreData(
             merged.channels,
             merged.flows,
             merged.deletedChannelIds,
@@ -148,13 +223,60 @@ export function App() {
       },
       (status) => {
         setIsWsConnected(status === 'connected');
+      },
+      // onRequestFileTransfer: quando o PC solicita o arquivo original presente no celular
+      async (req) => {
+        const reg = getRegisteredOriginalFile(req.fileId);
+        if (reg && config.serverUrl && config.token) {
+          try {
+            uploadFileToPcStream(
+              config.serverUrl,
+              config.token,
+              req.channelName,
+              reg.file,
+              req.fileName,
+              req.fileId,
+              (progress) => {
+                wsClient.sendFileProgress({ fileId: req.fileId, ...progress });
+                setDownloadProgressMap((prev) => ({
+                  ...prev,
+                  [req.fileId]: { ...progress, isDownloading: true },
+                }));
+              }
+            ).then(() => {
+              setDownloadProgressMap((prev) => ({
+                ...prev,
+                [req.fileId]: { percent: 100, isDownloading: false, isSuccess: true },
+              }));
+            });
+          } catch (err) {
+            console.error('[WebSocketSync] Erro no upload sob demanda para o PC:', err);
+          }
+        }
+      },
+      // onFileProgress
+      (prog) => {
+        setDownloadProgressMap((prev) => ({
+          ...prev,
+          [prog.fileId]: {
+            percent: prog.percent,
+            speed: prog.speed,
+            loaded: prog.loaded,
+            total: prog.total,
+            isDownloading: prog.percent < 100,
+            isSuccess: prog.percent >= 100,
+          },
+        }));
       }
     );
 
+    wsClientRef.current = wsClient;
+
     return () => {
       wsClient.destroy();
+      wsClientRef.current = null;
     };
-  }, [isElectron, store.channels.length, store.flows.length]);
+  }, [isElectron, isSyncModalOpen]);
 
   const flowsCount = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -197,16 +319,18 @@ export function App() {
     const name = newChannelName.trim();
     if (name) {
       store.createChannel(name);
+      setTimeout(() => broadcastDataChange(), 50);
     }
     setCreatingChannel(false);
     setNewChannelName('');
   }
 
-  // Envio de Arquivo Binário (PDF, EXE, DOC, etc.)
+  // Envio de Arquivo Binário (PDF, EXE, DOC, etc.) — Sem duplicação no remetente
   async function handleSendFile(file: File) {
     if (!activeChannel) return;
     const channelName = activeChannel.name;
     const ext = file.name.split('.').pop()?.toLowerCase() || 'file';
+    const originalPath = (file as any).path || '';
 
     const item = store.addFlow({
       type: 'file',
@@ -214,77 +338,163 @@ export function App() {
       fileName: file.name,
       fileSize: file.size,
       fileType: ext,
+      filePath: originalPath,
       logs: [
         {
           timestamp: Date.now(),
           level: 'info',
           message: `Arquivo selecionado: ${file.name} (${formatBytes(file.size)})`,
+          details: originalPath ? `Origem no disco: ${originalPath}` : 'Pronto para download sob demanda',
         },
       ],
     });
 
-    const startTime = performance.now();
-    try {
-      // 1. Salva localmente em Documents > PsProject > channels > [canal]
-      const saved = await saveLocalFile(channelName, file.name, file);
-      const durationSec = Math.max(0.001, (performance.now() - startTime) / 1000);
-      const speed = `${(file.size / (1024 * 1024) / durationSec).toFixed(2)} MB/s`;
+    // Registra referência original em memória sem criar cópias desnecessárias
+    registerOriginalFile(item.id, file, file.name, originalPath);
 
-      store.addFlowLog(item.id, {
-        timestamp: Date.now(),
-        level: 'success',
-        message: `Salvo em Documents/PsProject/channels/${channelName}`,
-        details: `Caminho: ${saved.filePath} (${speed})`,
+    if (isElectron && originalPath && window.electronAPI?.registerOriginalFile) {
+      await window.electronAPI.registerOriginalFile({
+        fileId: item.id,
+        originalPath,
+        fileName: file.name,
+        fileSize: file.size,
       });
+    }
 
-      store.updateFlowPreview(item.id, {
-        filePath: saved.filePath,
-        transferSpeed: speed,
-      });
+    // Push instantâneo via WebSocket
+    broadcastDataChange();
+  }
 
-      // Se estiver no Desktop, propaga via WebSocket Push para os celulares conectados
-      if (window.electronAPI?.broadcastSyncPush) {
-        window.electronAPI.broadcastSyncPush({
-          type: 'sync_data_updated',
-          data: store.getSyncPayload(),
-        });
-      }
+  // Download Sob Demanda (Foto ou Arquivo) com barra de progresso em tempo real
+  async function handleDownloadItem(item: FlowItem) {
+    if (!activeChannel) return;
+    const channelName = activeChannel.name;
 
-      // Se estiver no celular conectado ao PC, envia via stream binário puro (FTP-like)
-      const syncConfig = loadSyncConfig();
-      if (syncConfig && syncConfig.serverUrl && syncConfig.token) {
-        store.addFlowLog(item.id, {
-          timestamp: Date.now(),
-          level: 'info',
-          message: `Iniciando upload binário para o PC (${syncConfig.serverUrl})...`,
-        });
+    // 1. Download de Imagem
+    if (item.type === 'image') {
+      const imgData = item.imageData || item.image;
+      if (!imgData) return;
 
-        const uploadRes = await uploadFileToPcStream(
-          syncConfig.serverUrl,
-          syncConfig.token,
+      setDownloadProgressMap((prev) => ({
+        ...prev,
+        [item.id]: { percent: 20, isDownloading: true },
+      }));
+
+      try {
+        const saved = await downloadImageDirect(
           channelName,
-          file,
-          file.name,
-          item.id
+          item.imageName || `imagem_${Date.now()}.png`,
+          imgData,
+          (prog) => {
+            setDownloadProgressMap((prev) => ({
+              ...prev,
+              [item.id]: { ...prog, isDownloading: true },
+            }));
+          }
         );
 
         store.addFlowLog(item.id, {
           timestamp: Date.now(),
           level: 'success',
-          message: `Upload concluído para o PC em ${uploadRes.durationMs}ms`,
-          details: `Velocidade: ${uploadRes.speed}`,
+          message: `Imagem salva em Documents/PsProject/channels/${channelName}`,
+          details: `Caminho: ${saved.filePath}`,
         });
 
-        store.updateFlowPreview(item.id, {
-          transferSpeed: uploadRes.speed,
+        store.updateFlowPreview(item.id, { filePath: saved.filePath });
+        setDownloadProgressMap((prev) => ({
+          ...prev,
+          [item.id]: { percent: 100, isDownloading: false, isSuccess: true },
+        }));
+      } catch (err: any) {
+        store.addFlowLog(item.id, {
+          timestamp: Date.now(),
+          level: 'error',
+          message: `Erro ao baixar imagem: ${err.message || 'Falha desconhecida'}`,
+        });
+        setDownloadProgressMap((prev) => ({
+          ...prev,
+          [item.id]: { percent: 0, isDownloading: false, isSuccess: false },
+        }));
+      }
+      return;
+    }
+
+    // 2. Download de Arquivo Binário
+    if (item.type === 'file') {
+      const syncConfig = loadSyncConfig();
+
+      // Se estiver no celular conectado ao servidor PC:
+      if (!isElectron && syncConfig?.serverUrl && syncConfig?.token) {
+        setDownloadProgressMap((prev) => ({
+          ...prev,
+          [item.id]: { percent: 5, isDownloading: true },
+        }));
+
+        try {
+          const res = await downloadFileWithProgress(
+            syncConfig.serverUrl,
+            syncConfig.token,
+            channelName,
+            item.fileName || 'arquivo',
+            item.id,
+            item.filePath,
+            (prog) => {
+              setDownloadProgressMap((prev) => ({
+                ...prev,
+                [item.id]: { ...prog, isDownloading: true },
+              }));
+            }
+          );
+
+          store.addFlowLog(item.id, {
+            timestamp: Date.now(),
+            level: 'success',
+            message: `Arquivo baixado para Documents/PsProject/channels/${channelName}`,
+            details: `Caminho: ${res.filePath} (${res.speed})`,
+          });
+
+          store.updateFlowPreview(item.id, {
+            filePath: res.filePath,
+            transferSpeed: res.speed,
+          });
+
+          setDownloadProgressMap((prev) => ({
+            ...prev,
+            [item.id]: { percent: 100, isDownloading: false, isSuccess: true },
+          }));
+        } catch (err: any) {
+          store.addFlowLog(item.id, {
+            timestamp: Date.now(),
+            level: 'error',
+            message: `Erro ao baixar arquivo: ${err.message || 'Falha'}`,
+          });
+          setDownloadProgressMap((prev) => ({
+            ...prev,
+            [item.id]: { percent: 0, isDownloading: false, isSuccess: false },
+          }));
+        }
+        return;
+      }
+
+      // Se estiver no PC e o arquivo estiver no celular conectado:
+      if (isElectron && window.electronAPI?.requestFileDownloadFromMobile) {
+        setDownloadProgressMap((prev) => ({
+          ...prev,
+          [item.id]: { percent: 5, isDownloading: true },
+        }));
+
+        store.addFlowLog(item.id, {
+          timestamp: Date.now(),
+          level: 'info',
+          message: 'Solicitando envio do arquivo original ao celular...',
+        });
+
+        await window.electronAPI.requestFileDownloadFromMobile({
+          fileId: item.id,
+          channelName,
+          fileName: item.fileName || 'arquivo',
         });
       }
-    } catch (err: any) {
-      store.addFlowLog(item.id, {
-        timestamp: Date.now(),
-        level: 'error',
-        message: `Erro no processamento do arquivo: ${err.message || 'Falha desconhecida'}`,
-      });
     }
   }
 
@@ -316,13 +526,7 @@ export function App() {
       ],
     });
 
-    if (window.electronAPI?.broadcastSyncPush) {
-      window.electronAPI.broadcastSyncPush({
-        type: 'sync_data_updated',
-        data: store.getSyncPayload(),
-      });
-    }
-
+    broadcastDataChange();
     return item;
   }
 
@@ -342,12 +546,7 @@ export function App() {
       ],
     });
 
-    if (window.electronAPI?.broadcastSyncPush) {
-      window.electronAPI.broadcastSyncPush({
-        type: 'sync_data_updated',
-        data: store.getSyncPayload(),
-      });
-    }
+    broadcastDataChange();
   }
 
   // Envio de Imagem
@@ -367,12 +566,7 @@ export function App() {
       ],
     });
 
-    if (window.electronAPI?.broadcastSyncPush) {
-      window.electronAPI.broadcastSyncPush({
-        type: 'sync_data_updated',
-        data: store.getSyncPayload(),
-      });
-    }
+    broadcastDataChange();
   }
 
   const isWsLive = isWsConnected || (isElectron && Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 60000));
@@ -468,6 +662,8 @@ export function App() {
                     onDelete={store.deleteFlow}
                     onTogglePin={store.togglePin}
                     onUpdateImage={store.updateFlowImage}
+                    onDownloadItem={handleDownloadItem}
+                    downloadProgress={downloadProgressMap[item.id]}
                   />
                 ))}
               </div>

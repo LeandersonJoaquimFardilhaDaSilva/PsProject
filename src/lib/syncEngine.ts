@@ -120,19 +120,27 @@ export class WebSocketSyncClient {
   private token: string;
   private onDataUpdated: (data: any) => void;
   private onStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void;
+  private onRequestFileTransfer?: (data: { fileId: string; channelName: string; fileName: string }) => void;
+  private onFileProgress?: (data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }) => void;
   private reconnectTimer: any = null;
+  private pingInterval: any = null;
+  private lastPongTime = Date.now();
   private isDestroyed = false;
 
   constructor(
     serverUrl: string,
     token: string,
     onDataUpdated: (data: any) => void,
-    onStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void
+    onStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void,
+    onRequestFileTransfer?: (data: { fileId: string; channelName: string; fileName: string }) => void,
+    onFileProgress?: (data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }) => void
   ) {
     this.serverUrl = serverUrl;
     this.token = token;
     this.onDataUpdated = onDataUpdated;
     this.onStatusChange = onStatusChange;
+    this.onRequestFileTransfer = onRequestFileTransfer;
+    this.onFileProgress = onFileProgress;
     this.connect();
   }
 
@@ -153,17 +161,48 @@ export class WebSocketSyncClient {
 
       this.ws.onopen = () => {
         if (this.isDestroyed) return;
+        this.lastPongTime = Date.now();
         this.onStatusChange('connected');
         console.log('[WebSocketSync] Conectado em tempo real com o PC!');
+
+        // Inicia heartbeat contínuo a cada 10 segundos
+        if (this.pingInterval) clearInterval(this.pingInterval);
+        this.pingInterval = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            try {
+              this.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }));
+            } catch {
+              // ignore
+            }
+          }
+          // Se não receber sinal há mais de 30s, reconecta
+          if (Date.now() - this.lastPongTime > 30000) {
+            console.warn('[WebSocketSync] Timeout de heartbeat, reconectando...');
+            this.ws?.close();
+          }
+        }, 10000);
       };
 
       this.ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          this.lastPongTime = Date.now();
+
+          if (msg.type === 'pong' || msg.type === 'server_ping') {
+            if (msg.type === 'server_ping' && this.ws && this.ws.readyState === WebSocket.OPEN) {
+              this.ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+            }
+            return;
+          }
+
           if (msg.type === 'sync_data_updated' || msg.type === 'sync_response') {
             this.onDataUpdated(msg.data);
           } else if (msg.type === 'file_uploaded') {
             this.onDataUpdated({ type: 'file_uploaded', file: msg.data });
+          } else if (msg.type === 'request_file_transfer') {
+            this.onRequestFileTransfer?.(msg);
+          } else if (msg.type === 'file_transfer_progress') {
+            this.onFileProgress?.(msg);
           }
         } catch (err) {
           console.error('[WebSocketSync] Erro ao ler mensagem recebida:', err);
@@ -171,14 +210,17 @@ export class WebSocketSyncClient {
       };
 
       this.ws.onclose = () => {
+        this.stopPing();
         this.onStatusChange('disconnected');
         this.scheduleReconnect();
       };
 
       this.ws.onerror = () => {
+        this.stopPing();
         this.onStatusChange('disconnected');
       };
     } catch {
+      this.stopPing();
       this.onStatusChange('disconnected');
       this.scheduleReconnect();
     }
@@ -192,16 +234,40 @@ export class WebSocketSyncClient {
     return false;
   }
 
+  sendFileProgress(data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }): boolean {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'file_transfer_progress', ...data }));
+      return true;
+    }
+    return false;
+  }
+
+  requestFileTransfer(fileId: string, channelName: string, fileName: string): boolean {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'request_file_transfer', fileId, channelName, fileName }));
+      return true;
+    }
+    return false;
+  }
+
+  private stopPing() {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
+    }
+  }
+
   scheduleReconnect() {
     if (this.isDestroyed || this.reconnectTimer) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 3000);
+    }, 2000);
   }
 
   destroy() {
     this.isDestroyed = true;
+    this.stopPing();
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     if (this.ws) {
       this.ws.close();

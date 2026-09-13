@@ -58,7 +58,10 @@ export interface ElectronAPI {
   openFileLocation: (filePath: string) => Promise<boolean>;
   openFileExternal: (filePath: string) => Promise<boolean>;
   broadcastSyncPush: (data: any) => Promise<boolean>;
+  registerOriginalFile: (data: { fileId: string; originalPath: string; fileName: string; fileSize: number }) => Promise<boolean>;
+  requestFileDownloadFromMobile: (data: { fileId: string; channelName: string; fileName: string }) => Promise<boolean>;
   onFileReceivedFromMobile: (callback: (data: any) => void) => () => void;
+  onFileProgress: (callback: (data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }) => void) => () => void;
 }
 
 declare global {

@@ -43,11 +43,14 @@ function startSyncServer(options = {}) {
     console.error('[SyncServer] Erro ao criar diretório base PsProject:', err);
   }
 
+  const fileRegistry = new Map();
+
   const onSyncRequest =
     options.onSyncRequest ||
     (async () => ({ channels: [], flows: [], deletedChannelIds: [], deletedFlowIds: [] }));
   const onClientConnected = options.onClientConnected || (() => {});
   const onFileReceived = options.onFileReceived || (() => {});
+  const onFileProgress = options.onFileProgress || (() => {});
 
   // Servidor HTTP
   const server = http.createServer(async (req, res) => {
@@ -57,6 +60,10 @@ function startSyncServer(options = {}) {
     res.setHeader(
       'Access-Control-Allow-Headers',
       'Content-Type, Authorization, X-Sync-Token, X-Channel-Name, X-File-Name, X-File-Id, X-File-Type'
+    );
+    res.setHeader(
+      'Access-Control-Expose-Headers',
+      'Content-Length, Content-Disposition, X-File-Size, X-File-Name'
     );
 
     if (req.method === 'OPTIONS') {
@@ -75,7 +82,7 @@ function startSyncServer(options = {}) {
         JSON.stringify({
           status: 'ok',
           device: 'Flow Desktop',
-          version: '0.3.0',
+          version: '0.3.1',
           websocketUrl: `ws://${ips[0]}:${port}/ws`,
           ip: ips[0],
           port,
@@ -146,6 +153,9 @@ function startSyncServer(options = {}) {
           savedAt: Date.now(),
         };
 
+        // Registra o arquivo salvo
+        fileRegistry.set(fileId, { originalPath: targetFilePath, fileName: safeFileName, fileSize: bytesWritten });
+
         onFileReceived(result);
 
         // Notifica clientes WebSocket em tempo real sobre o novo arquivo recebido
@@ -168,32 +178,54 @@ function startSyncServer(options = {}) {
     }
 
     // 3. Download de Arquivos Binários via Stream direto do disco
+    // Envia o arquivo diretamente de sua localização original (Downloads, DCIM, Documents, etc.)
     if (url.pathname === '/api/files/download' && req.method === 'GET') {
+      const fileId = url.searchParams.get('fileId');
+      const directPath = url.searchParams.get('filePath');
       const channelName = decodeURIComponent(url.searchParams.get('channelName') || 'Geral');
-      const fileName = decodeURIComponent(url.searchParams.get('fileName') || '');
+      const rawFileName = decodeURIComponent(url.searchParams.get('fileName') || '');
 
-      if (!fileName) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Nome do arquivo não especificado' }));
-        return;
+      let targetFilePath = null;
+
+      // 1. Prioridade: busca pelo fileId registrado no PC (caminho original, ex: Downloads, DCIM, Desktop)
+      if (fileId && fileRegistry.has(fileId)) {
+        const reg = fileRegistry.get(fileId);
+        if (reg.originalPath && fs.existsSync(reg.originalPath)) {
+          targetFilePath = reg.originalPath;
+        }
       }
 
-      const filePath = path.join(baseFilesPath, sanitizeName(channelName), sanitizeName(fileName));
+      // 2. Prioridade: busca pelo caminho absoluto direto fornecido
+      if (!targetFilePath && directPath && fs.existsSync(directPath)) {
+        targetFilePath = directPath;
+      }
 
-      if (!fs.existsSync(filePath)) {
+      // 3. Fallback: busca na pasta Documents/PsProject/channels/[channelName]/[fileName]
+      if (!targetFilePath && rawFileName) {
+        const fallbackPath = path.join(baseFilesPath, sanitizeName(channelName), sanitizeName(rawFileName));
+        if (fs.existsSync(fallbackPath)) {
+          targetFilePath = fallbackPath;
+        }
+      }
+
+      if (!targetFilePath || !fs.existsSync(targetFilePath)) {
         res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ error: 'Arquivo não encontrado no disco' }));
+        res.end(JSON.stringify({ error: 'Arquivo original não encontrado no disco do servidor' }));
         return;
       }
 
-      const stat = fs.statSync(filePath);
+      const stat = fs.statSync(targetFilePath);
+      const downloadName = rawFileName || path.basename(targetFilePath);
+
       res.writeHead(200, {
         'Content-Type': 'application/octet-stream',
         'Content-Length': stat.size,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(path.basename(filePath))}"`,
+        'Content-Disposition': `attachment; filename="${encodeURIComponent(downloadName)}"`,
+        'X-File-Size': stat.size.toString(),
+        'X-File-Name': encodeURIComponent(downloadName),
       });
 
-      fs.createReadStream(filePath).pipe(res);
+      fs.createReadStream(targetFilePath).pipe(res);
       return;
     }
 
@@ -317,6 +349,13 @@ function startSyncServer(options = {}) {
           );
         } else if (data.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+        } else if (data.type === 'request_file_transfer') {
+          // Repassa pedido de transferência de arquivo para outros dispositivos conectados
+          broadcastWs(data, ws);
+        } else if (data.type === 'file_transfer_progress') {
+          // Repassa progresso para o PC e outros clientes
+          onFileProgress(data);
+          broadcastWs(data, ws);
         }
       } catch (err) {
         console.error('[SyncServer WS] Erro ao processar mensagem WebSocket:', err);
@@ -333,6 +372,19 @@ function startSyncServer(options = {}) {
       connectedWsClients.delete(ws);
     });
   });
+
+  // Heartbeat periódico (a cada 15 segundos) para manter ativas conexões no Android WebView / NAT
+  const heartbeatInterval = setInterval(() => {
+    for (const client of connectedWsClients) {
+      if (client.readyState === WebSocket.OPEN) {
+        try {
+          client.send(JSON.stringify({ type: 'server_ping', timestamp: Date.now() }));
+        } catch {
+          connectedWsClients.delete(client);
+        }
+      }
+    }
+  }, 15000);
 
   function broadcastWs(data, excludeWs = null) {
     const payload = JSON.stringify(data);
@@ -360,6 +412,11 @@ function startSyncServer(options = {}) {
         ips,
         documentsPath: baseFilesPath,
         broadcast: broadcastWs,
+        registerOriginalFile: (fileId, originalPath, fileName, fileSize) => {
+          fileRegistry.set(fileId, { originalPath, fileName, fileSize });
+          return true;
+        },
+        getFileRegistry: () => fileRegistry,
         getQrData: () => ({
           protocol: 'flow-sync',
           version: 2,

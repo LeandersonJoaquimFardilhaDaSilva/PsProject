@@ -221,6 +221,27 @@ ipcMain.handle('broadcast-sync-push', (_, data) => {
   return false;
 });
 
+ipcMain.handle('register-original-file', (_, { fileId, originalPath, fileName, fileSize }) => {
+  if (syncServerInstance?.registerOriginalFile) {
+    syncServerInstance.registerOriginalFile(fileId, originalPath, fileName, fileSize);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('request-file-download-from-mobile', (_, { fileId, channelName, fileName }) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({
+      type: 'request_file_transfer',
+      fileId,
+      channelName,
+      fileName,
+    });
+    return true;
+  }
+  return false;
+});
+
 app.whenReady().then(async () => {
   try {
     syncServerInstance = await startSyncServer({
@@ -228,6 +249,11 @@ app.whenReady().then(async () => {
       onFileReceived: (fileInfo) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('file-received-from-mobile', fileInfo);
+        }
+      },
+      onFileProgress: (progressInfo) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('file-transfer-progress', progressInfo);
         }
       },
       onSyncRequest: async (payload) => {

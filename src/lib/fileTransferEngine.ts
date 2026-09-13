@@ -10,6 +10,29 @@ export interface FileTransferResult {
   durationMs: number;
 }
 
+export interface TransferProgress {
+  percent: number;
+  speed: string;
+  loaded: number;
+  total: number;
+}
+
+// Registro em memória de arquivos originais (para envio sob demanda sem criar cópias)
+const originalFilesMap = new Map<string, { file: File | Blob; fileName: string; originalPath?: string }>();
+
+export function registerOriginalFile(
+  fileId: string,
+  file: File | Blob,
+  fileName: string,
+  originalPath?: string
+) {
+  originalFilesMap.set(fileId, { file, fileName, originalPath });
+}
+
+export function getRegisteredOriginalFile(fileId: string) {
+  return originalFilesMap.get(fileId);
+}
+
 export function sanitizeFileName(name: string): string {
   if (!name) return `arquivo_${Date.now()}`;
   return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim();
@@ -81,6 +104,7 @@ export function getFileCategory(fileName: string): {
 
 /**
  * Salva um arquivo localmente na pasta Documents/PsProject/channels/[channelName]
+ * (Acionado apenas quando o usuário clica no botão de Download)
  */
 export async function saveLocalFile(
   channelName: string,
@@ -116,7 +140,6 @@ export async function saveLocalFile(
 
       const targetPath = `${folderPath}/${safeFile}`;
 
-      // Converte para base64 apenas temporariamente para o bridge do Capacitor salvar no disco
       const base64 = await blobToBase64(fileBlob);
       const pureBase64 = base64.split(',')[1] || base64;
 
@@ -135,9 +158,21 @@ export async function saveLocalFile(
     }
   }
 
-  // Fallback web: URL de objeto em memória
+  // Fallback web: URL de objeto em memória ou download via tag <a>
+  const url = URL.createObjectURL(fileBlob);
+  try {
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = safeFile;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } catch {
+    // ignore
+  }
+
   return {
-    filePath: URL.createObjectURL(fileBlob),
+    filePath: url,
     fileSize: fileBlob.size,
   };
 }
@@ -152,7 +187,120 @@ function blobToBase64(blob: Blob): Promise<string> {
 }
 
 /**
- * Envia um arquivo como stream binário puro (application/octet-stream) para o PC
+ * Baixa um arquivo sob demanda com leitura em stream e relatório de progresso em tempo real
+ */
+export async function downloadFileWithProgress(
+  pcBaseUrl: string,
+  token: string,
+  channelName: string,
+  fileName: string,
+  fileId?: string,
+  filePath?: string,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<{ filePath: string; fileSize: number; speed: string }> {
+  let baseUrl = pcBaseUrl.trim().replace(/\/+$/, '');
+  if (!/^https?:\/\//i.test(baseUrl)) {
+    baseUrl = `http://${baseUrl}`;
+  }
+
+  const params = new URLSearchParams({
+    token,
+    channelName,
+    fileName,
+  });
+  if (fileId) params.append('fileId', fileId);
+  if (filePath) params.append('filePath', filePath);
+
+  const downloadUrl = `${baseUrl}/api/files/download?${params.toString()}`;
+
+  const start = performance.now();
+  const res = await fetch(downloadUrl, {
+    headers: {
+      'X-Sync-Token': token,
+    },
+  });
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    throw new Error(`Falha no download (HTTP ${res.status}): ${errText || res.statusText}`);
+  }
+
+  const contentLengthHeader = res.headers.get('Content-Length') || res.headers.get('X-File-Size');
+  const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
+
+  if (!res.body) {
+    throw new Error('Corpo de resposta vazio');
+  }
+
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let loaded = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (value) {
+      chunks.push(value);
+      loaded += value.length;
+      const elapsedSec = Math.max(0.001, (performance.now() - start) / 1000);
+      const speedMBs = (loaded / (1024 * 1024) / elapsedSec).toFixed(2);
+      const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+      onProgress?.({
+        percent,
+        speed: `${speedMBs} MB/s`,
+        loaded,
+        total: total || loaded,
+      });
+    }
+  }
+
+  const durationSec = Math.max(0.001, (performance.now() - start) / 1000);
+  const finalSpeed = `${(loaded / (1024 * 1024) / durationSec).toFixed(2)} MB/s`;
+
+  // Cria Blob e salva na pasta Documents local
+  const blob = new Blob(chunks as BlobPart[]);
+  const saved = await saveLocalFile(channelName, fileName, blob);
+
+  return {
+    filePath: saved.filePath,
+    fileSize: loaded,
+    speed: finalSpeed,
+  };
+}
+
+/**
+ * Salva imagem diretamente sob demanda (substituindo copiar)
+ */
+export async function downloadImageDirect(
+  channelName: string,
+  imageName: string,
+  imageData: string,
+  onProgress?: (progress: TransferProgress) => void
+): Promise<{ filePath: string; fileSize: number }> {
+  const safeName = imageName ? sanitizeFileName(imageName) : `imagem_${Date.now()}.png`;
+  let blob: Blob;
+
+  onProgress?.({ percent: 25, speed: '--', loaded: 0, total: 100 });
+
+  if (imageData.startsWith('data:')) {
+    const res = await fetch(imageData);
+    blob = await res.blob();
+  } else if (/^https?:\/\//i.test(imageData)) {
+    const res = await fetch(imageData);
+    blob = await res.blob();
+  } else {
+    throw new Error('Formato de imagem inválido para download');
+  }
+
+  onProgress?.({ percent: 75, speed: '--', loaded: blob.size, total: blob.size });
+  const saved = await saveLocalFile(channelName, safeName, blob);
+  onProgress?.({ percent: 100, speed: '--', loaded: blob.size, total: blob.size });
+
+  return saved;
+}
+
+/**
+ * Envia um arquivo como stream binário puro para o PC com suporte a progresso em tempo real
  */
 export async function uploadFileToPcStream(
   pcBaseUrl: string,
@@ -160,7 +308,8 @@ export async function uploadFileToPcStream(
   channelName: string,
   file: File | Blob,
   fileName: string,
-  fileId?: string
+  fileId?: string,
+  onProgress?: (progress: TransferProgress) => void
 ): Promise<FileTransferResult> {
   const start = performance.now();
   const safeChannel = sanitizeFileName(channelName);
@@ -173,34 +322,57 @@ export async function uploadFileToPcStream(
     safeFile
   )}&fileId=${encodeURIComponent(id)}`;
 
-  const res = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/octet-stream',
-      'X-Sync-Token': token,
-      'X-Channel-Name': encodeURIComponent(safeChannel),
-      'X-File-Name': encodeURIComponent(safeFile),
-      'X-File-Id': id,
-    },
-    body: file,
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', uploadUrl, true);
+    xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+    xhr.setRequestHeader('X-Sync-Token', token);
+    xhr.setRequestHeader('X-Channel-Name', encodeURIComponent(safeChannel));
+    xhr.setRequestHeader('X-File-Name', encodeURIComponent(safeFile));
+    xhr.setRequestHeader('X-File-Id', id);
+
+    if (xhr.upload && onProgress) {
+      xhr.upload.onprogress = (evt) => {
+        if (evt.lengthComputable) {
+          const elapsedSec = Math.max(0.001, (performance.now() - start) / 1000);
+          const speedMBs = (evt.loaded / (1024 * 1024) / elapsedSec).toFixed(2);
+          const percent = Math.min(100, Math.round((evt.loaded / evt.total) * 100));
+          onProgress({
+            percent,
+            speed: `${speedMBs} MB/s`,
+            loaded: evt.loaded,
+            total: evt.total,
+          });
+        }
+      };
+    }
+
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          const json = JSON.parse(xhr.responseText);
+          const durationMs = Math.round(performance.now() - start);
+          const durationSec = Math.max(0.001, durationMs / 1000);
+          const speed = `${((file.size / (1024 * 1024)) / durationSec).toFixed(2)} MB/s`;
+          resolve({
+            fileId: id,
+            fileName: safeFile,
+            filePath: json.filePath || '',
+            fileSize: file.size,
+            speed: json.speed || speed,
+            durationMs,
+          });
+        } catch (e: any) {
+          reject(new Error(`Erro ao ler resposta do upload: ${e.message}`));
+        }
+      } else {
+        reject(new Error(`Falha no upload (HTTP ${xhr.status}): ${xhr.statusText}`));
+      }
+    };
+
+    xhr.onerror = () => reject(new Error('Falha de rede durante o upload'));
+    xhr.ontimeout = () => reject(new Error('Tempo limite de upload esgotado'));
+
+    xhr.send(file);
   });
-
-  if (!res.ok) {
-    const errText = await res.text().catch(() => '');
-    throw new Error(`Falha no upload do arquivo (HTTP ${res.status}): ${errText || res.statusText}`);
-  }
-
-  const json = await res.json();
-  const durationMs = Math.round(performance.now() - start);
-  const durationSec = Math.max(0.001, durationMs / 1000);
-  const speed = `${((file.size / (1024 * 1024)) / durationSec).toFixed(2)} MB/s`;
-
-  return {
-    fileId: id,
-    fileName: safeFile,
-    filePath: json.filePath || '',
-    fileSize: file.size,
-    speed: json.speed || speed,
-    durationMs,
-  };
 }

@@ -39,11 +39,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFileLocation: (filePath) => ipcRenderer.invoke('open-file-location', filePath),
   openFileExternal: (filePath) => ipcRenderer.invoke('open-file-external', filePath),
   broadcastSyncPush: (data) => ipcRenderer.invoke('broadcast-sync-push', data),
+  registerOriginalFile: (data) => ipcRenderer.invoke('register-original-file', data),
+  requestFileDownloadFromMobile: (data) => ipcRenderer.invoke('request-file-download-from-mobile', data),
   onFileReceivedFromMobile: (callback) => {
     const subscription = (_event, data) => callback(data);
     ipcRenderer.on('file-received-from-mobile', subscription);
     return () => {
       ipcRenderer.removeListener('file-received-from-mobile', subscription);
+    };
+  },
+  onFileProgress: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('file-transfer-progress', subscription);
+    return () => {
+      ipcRenderer.removeListener('file-transfer-progress', subscription);
     };
   },
 });

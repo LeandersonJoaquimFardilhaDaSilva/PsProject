@@ -18,6 +18,7 @@ import {
   CheckCircle2,
   AlertCircle,
   Clock,
+  Download,
 } from 'lucide-react';
 import type { FlowItem, FlowLogEntry } from '@/types';
 import { getDomain, isValidImageUrl } from '@/lib/linkPreview';
@@ -28,9 +29,25 @@ interface FlowCardProps {
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
   onUpdateImage: (id: string, image: string) => void;
+  onDownloadItem?: (item: FlowItem) => Promise<void> | void;
+  downloadProgress?: {
+    percent: number;
+    speed?: string;
+    loaded?: number;
+    total?: number;
+    isDownloading?: boolean;
+    isSuccess?: boolean;
+  };
 }
 
-export function FlowCard({ item, onDelete, onTogglePin, onUpdateImage }: FlowCardProps) {
+export function FlowCard({
+  item,
+  onDelete,
+  onTogglePin,
+  onUpdateImage,
+  onDownloadItem,
+  downloadProgress,
+}: FlowCardProps) {
   const [copied, setCopied] = useState(false);
   const [imageOpen, setImageOpen] = useState(false);
   const [editingImage, setEditingImage] = useState(false);
@@ -134,13 +151,47 @@ export function FlowCard({ item, onDelete, onTogglePin, onUpdateImage }: FlowCar
             >
               <Pin size={14} />
             </button>
-            <button
-              onClick={copyContent}
-              className="rounded-lg p-1.5 text-white/30 transition hover:text-white"
-              title="Copiar"
-            >
-              {copied ? <Check size={14} className="text-[#26de81]" /> : <Copy size={14} />}
-            </button>
+
+            {/* Substituição do botão de Copiar por Download em Fotos e Arquivos */}
+            {item.type === 'file' || item.type === 'image' ? (
+              <button
+                onClick={() => onDownloadItem?.(item)}
+                disabled={downloadProgress?.isDownloading}
+                className={`rounded-lg p-1.5 transition ${
+                  downloadProgress?.isSuccess
+                    ? 'text-[#26de81] bg-[#26de81]/15'
+                    : downloadProgress?.isDownloading
+                    ? 'text-[#00e5ff] animate-pulse bg-[#00e5ff]/10'
+                    : 'text-white/40 hover:bg-white/10 hover:text-white'
+                }`}
+                title={
+                  downloadProgress?.isDownloading
+                    ? 'Baixando...'
+                    : downloadProgress?.isSuccess
+                    ? 'Download concluído'
+                    : item.type === 'image'
+                    ? 'Baixar imagem para o dispositivo'
+                    : 'Baixar arquivo para o dispositivo'
+                }
+              >
+                {downloadProgress?.isDownloading ? (
+                  <Loader2 size={14} className="animate-spin text-[#00e5ff]" />
+                ) : downloadProgress?.isSuccess ? (
+                  <Check size={14} className="text-[#26de81]" />
+                ) : (
+                  <Download size={14} />
+                )}
+              </button>
+            ) : (
+              <button
+                onClick={copyContent}
+                className="rounded-lg p-1.5 text-white/30 transition hover:text-white"
+                title="Copiar"
+              >
+                {copied ? <Check size={14} className="text-[#26de81]" /> : <Copy size={14} />}
+              </button>
+            )}
+
             <button
               onClick={() => onDelete(item.id)}
               className="rounded-lg p-1.5 text-white/30 transition hover:text-red-400"
@@ -281,42 +332,100 @@ export function FlowCard({ item, onDelete, onTogglePin, onUpdateImage }: FlowCar
 
         {/* 4. Card de Arquivo Binário (PDF, EXE, DOC, ZIP, etc. — Estilo FTP) */}
         {item.type === 'file' && (
-          <div className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3.5 transition hover:bg-white/[0.04]">
-            <div className="flex items-center gap-3 min-w-0">
-              <div
-                className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-lg"
-                style={{ backgroundColor: fileCategory?.color || '#a29bfe' }}
-              >
-                {fileCategory?.extension || 'FILE'}
-              </div>
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-white truncate">
-                  {item.fileName || 'Arquivo sem nome'}
-                </p>
-                <div className="flex items-center gap-2 text-xs text-white/40 mt-0.5">
-                  <span>{formatBytes(item.fileSize || 0)}</span>
-                  {item.transferSpeed && (
-                    <span className="text-[#26de81]">· {item.transferSpeed}</span>
-                  )}
-                  {item.filePath && (
-                    <span className="hidden sm:inline truncate max-w-40 text-white/20">
-                      · {item.filePath}
-                    </span>
-                  )}
+          <div className="space-y-2.5">
+            <div className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3.5 transition hover:bg-white/[0.04]">
+              <div className="flex items-center gap-3 min-w-0">
+                <div
+                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-lg"
+                  style={{ backgroundColor: fileCategory?.color || '#a29bfe' }}
+                >
+                  {fileCategory?.extension || 'FILE'}
                 </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-white truncate">
+                    {item.fileName || 'Arquivo sem nome'}
+                  </p>
+                  <div className="flex items-center gap-2 text-xs text-white/40 mt-0.5">
+                    <span>{formatBytes(item.fileSize || 0)}</span>
+                    {item.transferSpeed && (
+                      <span className="text-[#26de81]">· {item.transferSpeed}</span>
+                    )}
+                    {item.filePath && (
+                      <span className="hidden sm:inline truncate max-w-40 text-white/20">
+                        · {item.filePath}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Botão de Download Sob Demanda */}
+                {(!item.filePath || downloadProgress?.isDownloading) && (
+                  <button
+                    onClick={() => onDownloadItem?.(item)}
+                    disabled={downloadProgress?.isDownloading}
+                    className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                      downloadProgress?.isSuccess
+                        ? 'bg-[#26de81]/15 text-[#26de81] border-[#26de81]/30'
+                        : downloadProgress?.isDownloading
+                        ? 'bg-[#00e5ff]/15 text-[#00e5ff] border-[#00e5ff]/40 animate-pulse'
+                        : 'border-white/10 bg-white/5 text-white/90 hover:bg-white/15 hover:text-white'
+                    }`}
+                  >
+                    {downloadProgress?.isDownloading ? (
+                      <>
+                        <Loader2 size={13} className="animate-spin text-[#00e5ff]" />
+                        <span>{downloadProgress.percent}%</span>
+                      </>
+                    ) : downloadProgress?.isSuccess ? (
+                      <>
+                        <Check size={13} className="text-[#26de81]" />
+                        <span>Baixado</span>
+                      </>
+                    ) : (
+                      <>
+                        <Download size={13} className="text-[#00e5ff]" />
+                        <span>Baixar</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
+                {/* Ação de Abrir na Pasta no PC */}
+                {isElectron && item.filePath && !downloadProgress?.isDownloading && (
+                  <button
+                    onClick={handleOpenFileLocation}
+                    className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/80 transition hover:bg-white/15 hover:text-white"
+                    title="Abrir pasta onde o arquivo foi salvo"
+                  >
+                    <FolderOpen size={14} className="text-[#00e5ff]" />
+                    <span className="hidden sm:inline">Abrir Pasta</span>
+                  </button>
+                )}
               </div>
             </div>
 
-            {/* Ação de Abrir na Pasta no PC */}
-            {isElectron && item.filePath && (
-              <button
-                onClick={handleOpenFileLocation}
-                className="flex items-center gap-1.5 shrink-0 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-medium text-white/80 transition hover:bg-white/15 hover:text-white"
-                title="Abrir pasta onde o arquivo foi salvo"
-              >
-                <FolderOpen size={14} className="text-[#00e5ff]" />
-                <span className="hidden sm:inline">Abrir Pasta</span>
-              </button>
+            {/* Barra de Progresso no Download de Arquivos (v0.3.1) */}
+            {downloadProgress?.isDownloading && (
+              <div className="rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 p-3 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between text-xs mb-1.5">
+                  <span className="flex items-center gap-1.5 font-medium text-[#00e5ff]">
+                    <Loader2 size={12} className="animate-spin" />
+                    Baixando arquivo... {downloadProgress.percent}%
+                  </span>
+                  <span className="text-white/50 text-[11px]">
+                    {formatBytes(downloadProgress.loaded || 0)} / {formatBytes(downloadProgress.total || item.fileSize || 0)}
+                    {downloadProgress.speed && ` · ${downloadProgress.speed}`}
+                  </span>
+                </div>
+                <div className="h-2 w-full overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full bg-gradient-to-r from-[#00e5ff] to-[#ff3e6c] transition-all duration-150"
+                    style={{ width: `${Math.max(3, downloadProgress.percent)}%` }}
+                  />
+                </div>
+              </div>
             )}
           </div>
         )}
@@ -352,14 +461,36 @@ export function FlowCard({ item, onDelete, onTogglePin, onUpdateImage }: FlowCar
 
       {imageOpen && item.type === 'image' && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-8 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-8 backdrop-blur-sm"
           onClick={() => setImageOpen(false)}
         >
-          <img
-            src={item.imageData}
-            alt={item.imageName || 'image'}
-            className="max-h-full max-w-full rounded-xl object-contain shadow-2xl"
-          />
+          <div className="relative max-h-full max-w-full" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={item.imageData}
+              alt={item.imageName || 'image'}
+              className="max-h-[85vh] max-w-[90vw] rounded-xl object-contain shadow-2xl"
+            />
+            <div className="absolute top-3 right-3 flex items-center gap-2">
+              <button
+                onClick={() => onDownloadItem?.(item)}
+                disabled={downloadProgress?.isDownloading}
+                className="flex items-center gap-1.5 rounded-lg bg-black/70 px-3 py-1.5 text-xs font-medium text-white backdrop-blur border border-white/20 hover:bg-black/90"
+              >
+                {downloadProgress?.isDownloading ? (
+                  <Loader2 size={13} className="animate-spin text-[#00e5ff]" />
+                ) : (
+                  <Download size={13} className="text-[#00e5ff]" />
+                )}
+                <span>Baixar</span>
+              </button>
+              <button
+                onClick={() => setImageOpen(false)}
+                className="rounded-lg bg-black/70 p-1.5 text-white/70 backdrop-blur border border-white/20 hover:text-white"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </>
