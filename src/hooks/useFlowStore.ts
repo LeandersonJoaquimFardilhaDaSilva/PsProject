@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Channel, FlowItem, FlowLogEntry } from '@/types';
 import {
   loadChannels,
@@ -30,17 +30,14 @@ function pickColor(index: number): string {
 }
 
 export function useFlowStore() {
-  const [channels, setChannels] = useState<Channel[]>(() => loadChannels());
-  const [flows, setFlows] = useState<FlowItem[]>(() => loadFlows());
+  const memoryRef = useRef<{ channels: Channel[]; flows: FlowItem[] }>({
+    channels: loadChannels(),
+    flows: loadFlows(),
+  });
+
+  const [channels, setChannels] = useState<Channel[]>(() => memoryRef.current.channels);
+  const [flows, setFlows] = useState<FlowItem[]>(() => memoryRef.current.flows);
   const [activeChannelId, setActiveChannelId] = useState<string | null>(null);
-
-  useEffect(() => {
-    saveChannels(channels);
-  }, [channels]);
-
-  useEffect(() => {
-    saveFlows(flows);
-  }, [flows]);
 
   useEffect(() => {
     if (channels.length > 0 && (activeChannelId === null || !channels.find((c) => c.id === activeChannelId))) {
@@ -56,31 +53,40 @@ export function useFlowStore() {
       id: uid(),
       name: name.trim() || 'Novo Canal',
       createdAt: Date.now(),
-      color: pickColor(channels.length),
+      color: pickColor(memoryRef.current.channels.length),
     };
-    setChannels((prev) => [...prev, channel]);
+    memoryRef.current.channels = [...memoryRef.current.channels, channel];
+    saveChannels(memoryRef.current.channels);
+    setChannels(memoryRef.current.channels);
     setActiveChannelId(channel.id);
     return channel;
-  }, [channels.length]);
+  }, []);
 
   const renameChannel = useCallback((id: string, name: string) => {
-    setChannels((prev) => prev.map((c) => (c.id === id ? { ...c, name: name.trim() || c.name } : c)));
+    memoryRef.current.channels = memoryRef.current.channels.map((c) =>
+      c.id === id ? { ...c, name: name.trim() || c.name } : c
+    );
+    saveChannels(memoryRef.current.channels);
+    setChannels(memoryRef.current.channels);
   }, []);
 
   const deleteChannel = useCallback((id: string) => {
     addDeletedChannelId(id);
-    setChannels((prev) => prev.filter((c) => c.id !== id));
-    setFlows((prev) => {
-      const remaining: FlowItem[] = [];
-      for (const f of prev) {
-        if (f.channelId === id) {
-          addDeletedFlowId(f.id);
-        } else {
-          remaining.push(f);
-        }
+    memoryRef.current.channels = memoryRef.current.channels.filter((c) => c.id !== id);
+    saveChannels(memoryRef.current.channels);
+    setChannels(memoryRef.current.channels);
+
+    const remaining: FlowItem[] = [];
+    for (const f of memoryRef.current.flows) {
+      if (f.channelId === id) {
+        addDeletedFlowId(f.id);
+      } else {
+        remaining.push(f);
       }
-      return remaining;
-    });
+    }
+    memoryRef.current.flows = remaining;
+    saveFlows(remaining);
+    setFlows(remaining);
   }, []);
 
   const addFlow = useCallback((flow: Omit<FlowItem, 'id' | 'createdAt' | 'pinned'>) => {
@@ -97,55 +103,83 @@ export function useFlowStore() {
         },
       ],
     };
-    setFlows((prev) => [...prev, item]);
+    memoryRef.current.flows = [...memoryRef.current.flows, item];
+    saveFlows(memoryRef.current.flows);
+    setFlows(memoryRef.current.flows);
     return item;
   }, []);
 
+  const addFlowDirect = useCallback((item: FlowItem) => {
+    if (!item || !item.id) return;
+    if (memoryRef.current.flows.some((f) => f.id === item.id)) return;
+    memoryRef.current.flows = [...memoryRef.current.flows, item];
+    saveFlows(memoryRef.current.flows);
+    setFlows(memoryRef.current.flows);
+  }, []);
+
   const addFlowLog = useCallback((flowId: string, log: FlowLogEntry) => {
-    setFlows((prev) =>
-      prev.map((f) =>
-        f.id === flowId
-          ? { ...f, logs: [...(f.logs || []), log] }
-          : f
-      )
+    memoryRef.current.flows = memoryRef.current.flows.map((f) =>
+      f.id === flowId
+        ? { ...f, logs: [...(f.logs || []), log] }
+        : f
     );
+    saveFlows(memoryRef.current.flows);
+    setFlows(memoryRef.current.flows);
   }, []);
 
   const deleteFlow = useCallback((id: string) => {
     addDeletedFlowId(id);
-    setFlows((prev) => prev.filter((f) => f.id !== id));
+    memoryRef.current.flows = memoryRef.current.flows.filter((f) => f.id !== id);
+    saveFlows(memoryRef.current.flows);
+    setFlows(memoryRef.current.flows);
   }, []);
 
   const togglePin = useCallback((id: string) => {
-    setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, pinned: !f.pinned } : f)));
+    memoryRef.current.flows = memoryRef.current.flows.map((f) =>
+      f.id === id ? { ...f, pinned: !f.pinned } : f
+    );
+    saveFlows(memoryRef.current.flows);
+    setFlows(memoryRef.current.flows);
   }, []);
 
   const clearChannel = useCallback((channelId: string) => {
-    setFlows((prev) => {
-      const remaining: FlowItem[] = [];
-      for (const f of prev) {
-        if (f.channelId === channelId) {
-          addDeletedFlowId(f.id);
-        } else {
-          remaining.push(f);
-        }
+    const remaining: FlowItem[] = [];
+    for (const f of memoryRef.current.flows) {
+      if (f.channelId === channelId) {
+        addDeletedFlowId(f.id);
+      } else {
+        remaining.push(f);
       }
-      return remaining;
-    });
+    }
+    memoryRef.current.flows = remaining;
+    saveFlows(remaining);
+    setFlows(remaining);
   }, []);
 
   const updateFlowImage = useCallback((id: string, image: string) => {
-    setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, image } : f)));
+    memoryRef.current.flows = memoryRef.current.flows.map((f) =>
+      f.id === id ? { ...f, image } : f
+    );
+    saveFlows(memoryRef.current.flows);
+    setFlows(memoryRef.current.flows);
   }, []);
 
   const updateFlowPreview = useCallback((id: string, preview: Partial<FlowItem>) => {
-    setFlows((prev) => prev.map((f) => (f.id === id ? { ...f, ...preview, isLoadingPreview: false } : f)));
+    memoryRef.current.flows = memoryRef.current.flows.map((f) =>
+      f.id === id ? { ...f, ...preview, isLoadingPreview: false } : f
+    );
+    saveFlows(memoryRef.current.flows);
+    setFlows(memoryRef.current.flows);
   }, []);
 
   const replaceStoreData = useCallback(
     (newChannels: Channel[], newFlows: FlowItem[], deletedChannelIds?: string[], deletedFlowIds?: string[]) => {
       if (deletedChannelIds) saveDeletedChannelIds(deletedChannelIds);
       if (deletedFlowIds) saveDeletedFlowIds(deletedFlowIds);
+      memoryRef.current.channels = newChannels;
+      memoryRef.current.flows = newFlows;
+      saveChannels(newChannels);
+      saveFlows(newFlows);
       setChannels(newChannels);
       setFlows(newFlows);
     },
@@ -154,12 +188,12 @@ export function useFlowStore() {
 
   const getSyncPayload = useCallback(() => {
     return {
-      channels,
-      flows,
+      channels: memoryRef.current.channels,
+      flows: memoryRef.current.flows,
       deletedChannelIds: loadDeletedChannelIds(),
       deletedFlowIds: loadDeletedFlowIds(),
     };
-  }, [channels, flows]);
+  }, []);
 
   return {
     channels,
@@ -170,6 +204,7 @@ export function useFlowStore() {
     renameChannel,
     deleteChannel,
     addFlow,
+    addFlowDirect,
     deleteFlow,
     togglePin,
     clearChannel,

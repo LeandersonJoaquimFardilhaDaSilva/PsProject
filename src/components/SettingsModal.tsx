@@ -7,6 +7,7 @@ import {
   ArrowDown,
   Check,
   Play,
+  Pause,
   RotateCcw,
   ExternalLink,
   Info,
@@ -15,6 +16,12 @@ import {
   XCircle,
   Sparkles,
   Zap,
+  Activity,
+  Radio,
+  Send,
+  Terminal,
+  Copy,
+  Trash2,
 } from 'lucide-react';
 import {
   loadPreviewSettings,
@@ -27,17 +34,30 @@ import {
   type ProviderTestResult,
   type LinkPreview,
 } from '@/lib/linkPreview';
+import type { NetworkTestState } from '@/hooks/useNetworkTest';
 
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
+  networkTest?: NetworkTestState;
+  isWsConnected?: boolean;
+  isElectron?: boolean;
+  serverUrl?: string;
 }
 
-export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
-  const [activeTab, setActiveTab] = useState<'preview' | 'about'>('preview');
+export function SettingsModal({
+  isOpen,
+  onClose,
+  networkTest,
+  isWsConnected = false,
+  isElectron = false,
+  serverUrl,
+}: SettingsModalProps) {
+  const [activeTab, setActiveTab] = useState<'preview' | 'network' | 'about'>('preview');
   const [settings, setSettings] = useState<PreviewSettings>(() => loadPreviewSettings());
   const [testUrl, setTestUrl] = useState('https://github.com');
   const [savedFeedback, setSavedFeedback] = useState(false);
+  const [copiedLogs, setCopiedLogs] = useState(false);
 
   // Resultados de teste individual por provedor
   const [testingId, setTestingId] = useState<string | null>(null);
@@ -122,6 +142,20 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
     }
   }
 
+  function handleCopyLogs() {
+    if (!networkTest?.logs || networkTest.logs.length === 0) return;
+    const text = networkTest.logs
+      .map((l) => {
+        const time = new Date(l.timestamp).toISOString();
+        return `[${time}] [${l.level.toUpperCase()}] ${l.message}${l.details ? ` - ${l.details}` : ''}`;
+      })
+      .join('\n');
+    navigator.clipboard.writeText(text).then(() => {
+      setCopiedLogs(true);
+      setTimeout(() => setCopiedLogs(false), 1500);
+    });
+  }
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-3 sm:p-4 backdrop-blur-sm animate-[fadeIn_0.2s_ease-out]">
       <div className="relative flex h-[90vh] max-h-[700px] w-full max-w-2xl flex-col overflow-hidden rounded-3xl border border-white/10 bg-[#0e0e15] shadow-2xl">
@@ -153,28 +187,44 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
         </div>
 
         {/* Tabs */}
-        <div className="flex border-b border-white/5 bg-[#0a0a0f] p-1.5 shrink-0">
+        <div className="flex border-b border-white/5 bg-[#0a0a0f] p-1.5 shrink-0 gap-1">
           <button
             onClick={() => setActiveTab('preview')}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2 text-xs font-medium transition ${
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
               activeTab === 'preview'
                 ? 'bg-white/10 text-white shadow-sm'
                 : 'text-white/40 hover:text-white/70'
             }`}
           >
             <Link2 size={14} />
-            Geração de Preview
+            <span>Geração de Preview</span>
+          </button>
+          <button
+            onClick={() => setActiveTab('network')}
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
+              activeTab === 'network'
+                ? 'bg-white/10 text-white shadow-sm'
+                : 'text-white/40 hover:text-white/70'
+            }`}
+          >
+            <Activity size={14} className={networkTest?.isAutoPing ? 'text-[#00e5ff] animate-pulse' : ''} />
+            <span>Teste de Rede</span>
+            {networkTest && networkTest.signalsHeard > 0 && (
+              <span className="rounded-full bg-[#00e5ff]/20 px-1.5 py-0.2 text-[10px] font-mono text-[#00e5ff]">
+                {networkTest.signalsHeard}
+              </span>
+            )}
           </button>
           <button
             onClick={() => setActiveTab('about')}
-            className={`flex flex-1 items-center justify-center gap-2 rounded-xl py-2 text-xs font-medium transition ${
+            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
               activeTab === 'about'
                 ? 'bg-white/10 text-white shadow-sm'
                 : 'text-white/40 hover:text-white/70'
             }`}
           >
             <Info size={14} />
-            Sobre o App
+            <span>Sobre o App</span>
           </button>
         </div>
 
@@ -418,6 +468,255 @@ export function SettingsModal({ isOpen, onClose }: SettingsModalProps) {
                 </div>
               </div>
             </>
+          ) : activeTab === 'network' ? (
+            <div className="space-y-5">
+              {/* Status da Conexão */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-white/5 bg-white/[0.02] p-4">
+                <div className="flex items-center gap-3">
+                  <div
+                    className={`flex h-10 w-10 items-center justify-center rounded-xl ${
+                      isElectron || isWsConnected
+                        ? 'bg-[#26de81]/15 text-[#26de81]'
+                        : 'bg-red-500/15 text-red-400'
+                    }`}
+                  >
+                    <Radio
+                      size={20}
+                      className={isElectron || isWsConnected ? 'animate-pulse' : ''}
+                    />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-sm font-semibold text-white">
+                        {isElectron ? 'Servidor Desktop (Host)' : 'Cliente Mobile (Conexão)'}
+                      </h3>
+                      <span
+                        className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                          isElectron || isWsConnected
+                            ? 'bg-[#26de81]/20 text-[#26de81]'
+                            : 'bg-red-500/20 text-red-400'
+                        }`}
+                      >
+                        <span
+                          className={`h-1.5 w-1.5 rounded-full ${
+                            isElectron || isWsConnected
+                              ? 'bg-[#26de81] animate-ping'
+                              : 'bg-red-500'
+                          }`}
+                        />
+                        {isElectron
+                          ? 'Servidor Local Ativo'
+                          : isWsConnected
+                          ? 'Conectado ao PC'
+                          : 'Desconectado'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-white/40 mt-0.5">
+                      {isElectron
+                        ? 'Pronto para trocar sinais e responder pings em tempo real com o celular'
+                        : serverUrl
+                        ? `Endereço do Servidor PC: ${serverUrl}`
+                        : 'Configure a conexão no menu de sincronização'}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <button
+                    onClick={networkTest?.resetCounters}
+                    className="flex items-center gap-1.5 rounded-xl border border-white/10 bg-white/5 px-3 py-1.5 text-xs text-white/70 hover:bg-white/10 hover:text-white transition"
+                    title="Zerar contadores e métricas"
+                  >
+                    <RotateCcw size={13} />
+                    Zerar
+                  </button>
+                </div>
+              </div>
+
+              {/* Placar de Sinais e Latência */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                {/* Sinais Ouvidos */}
+                <div className="relative overflow-hidden rounded-2xl border border-[#00e5ff]/20 bg-gradient-to-br from-[#00e5ff]/10 to-transparent p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-white/60">Sinais Ouvidos</span>
+                    <Radio size={16} className="text-[#00e5ff]" />
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-3xl font-bold font-mono text-white tracking-tight">
+                      {networkTest?.signalsHeard ?? 0}
+                    </span>
+                    <span className="text-[11px] text-[#00e5ff]/80 font-medium">sinais</span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-white/40">
+                    +1 a cada ping ou pong ouvido
+                  </p>
+                </div>
+
+                {/* Sinais Enviados */}
+                <div className="relative overflow-hidden rounded-2xl border border-[#f59e0b]/20 bg-gradient-to-br from-[#f59e0b]/10 to-transparent p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-white/60">Sinais Enviados</span>
+                    <Send size={16} className="text-[#f59e0b]" />
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-3xl font-bold font-mono text-white tracking-tight">
+                      {networkTest?.signalsSent ?? 0}
+                    </span>
+                    <span className="text-[11px] text-[#f59e0b]/80 font-medium">transmitidos</span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-white/40">
+                    Pings e respostas pong
+                  </p>
+                </div>
+
+                {/* Latência RTT */}
+                <div className="relative overflow-hidden rounded-2xl border border-[#26de81]/20 bg-gradient-to-br from-[#26de81]/10 to-transparent p-4 shadow-sm">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-white/60">Latência (RTT)</span>
+                    <Activity size={16} className="text-[#26de81]" />
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-2">
+                    <span className="text-3xl font-bold font-mono text-white tracking-tight">
+                      {networkTest?.lastRtt !== null ? `${networkTest?.lastRtt}` : '--'}
+                    </span>
+                    <span className="text-[11px] text-[#26de81]/80 font-medium">ms</span>
+                  </div>
+                  <p className="mt-1 text-[10px] text-white/40">
+                    {networkTest?.avgRtt !== null
+                      ? `Média: ${networkTest?.avgRtt}ms (Min: ${networkTest?.minRtt}ms, Max: ${networkTest?.maxRtt}ms)`
+                      : 'Aguardando sinais'}
+                  </p>
+                </div>
+              </div>
+
+              {/* Botões de Ação de Teste */}
+              <div className="flex flex-wrap items-center gap-2.5">
+                <button
+                  onClick={networkTest?.toggleAutoPing}
+                  className={`flex items-center gap-2 rounded-xl px-4 py-2.5 text-xs font-semibold text-white transition shadow-lg ${
+                    networkTest?.isAutoPing
+                      ? 'bg-gradient-to-r from-[#ff3e6c] to-pink-600 shadow-pink-500/20 animate-pulse'
+                      : 'bg-gradient-to-r from-[#00e5ff] to-[#ff3e6c] shadow-cyan-500/20 hover:opacity-90'
+                  }`}
+                >
+                  {networkTest?.isAutoPing ? (
+                    <>
+                      <Pause size={14} /> Pausar Ping-Pong Contínuo
+                    </>
+                  ) : (
+                    <>
+                      <Play size={14} /> Iniciar Ping-Pong Contínuo
+                    </>
+                  )}
+                </button>
+
+                <button
+                  onClick={networkTest?.sendSinglePing}
+                  disabled={networkTest?.isAutoPing}
+                  className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-xs font-medium text-white hover:bg-white/10 hover:border-white/20 transition disabled:opacity-40"
+                >
+                  <Send size={14} className="text-[#00e5ff]" />
+                  Enviar Sinal Único (Ping)
+                </button>
+              </div>
+
+              {/* Console de Diagnóstico e Erros */}
+              <div className="rounded-2xl border border-white/10 bg-[#07070a] overflow-hidden shadow-inner">
+                <div className="flex items-center justify-between border-b border-white/5 bg-white/[0.02] px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <Terminal size={14} className="text-white/40" />
+                    <span className="text-xs font-medium text-white/80">Console de Diagnóstico & Erros</span>
+                    <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-mono text-white/50">
+                      {networkTest?.logs.length ?? 0}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCopyLogs}
+                      className="flex items-center gap-1 text-[11px] text-white/40 hover:text-white transition"
+                    >
+                      <Copy size={12} />
+                      {copiedLogs ? 'Copiado!' : 'Copiar'}
+                    </button>
+                    <button
+                      onClick={networkTest?.clearLogs}
+                      className="flex items-center gap-1 text-[11px] text-white/40 hover:text-red-400 transition"
+                    >
+                      <Trash2 size={12} />
+                      Limpar
+                    </button>
+                  </div>
+                </div>
+
+                <div className="max-h-64 overflow-y-auto p-3 space-y-1.5 font-mono text-[11px]">
+                  {!networkTest?.logs || networkTest.logs.length === 0 ? (
+                    <div className="py-8 text-center text-white/30 text-xs">
+                      Aguardando sinais... Clique em "Iniciar Ping-Pong Contínuo" ou "Enviar Sinal Único" para testar a comunicação entre os dispositivos.
+                    </div>
+                  ) : (
+                    networkTest.logs.map((log) => {
+                      const timeStr = new Date(log.timestamp).toLocaleTimeString('pt-BR', {
+                        hour12: false,
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        fractionalSecondDigits: 3,
+                      } as any);
+
+                      const badgeStyles =
+                        {
+                          heard: 'bg-[#26de81]/15 text-[#26de81] border border-[#26de81]/30',
+                          sent: 'bg-[#00e5ff]/15 text-[#00e5ff] border border-[#00e5ff]/30',
+                          ping: 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/30',
+                          pong: 'bg-purple-500/15 text-purple-300 border border-purple-500/30',
+                          error: 'bg-[#ff3e6c]/20 text-[#ff3e6c] border border-[#ff3e6c]/40',
+                          info: 'bg-white/10 text-white/60 border border-white/10',
+                        }[log.level] || 'bg-white/10 text-white/60';
+
+                      const badgeLabel =
+                        {
+                          heard: 'OUVIDO',
+                          sent: 'ENVIADO',
+                          ping: 'PING',
+                          pong: 'PONG',
+                          error: 'ERRO',
+                          info: 'INFO',
+                        }[log.level] || 'LOG';
+
+                      return (
+                        <div
+                          key={log.id}
+                          className="flex items-start gap-2 py-0.5 hover:bg-white/[0.02] rounded px-1"
+                        >
+                          <span className="text-white/30 text-[10px] shrink-0 pt-0.5">
+                            {timeStr}
+                          </span>
+                          <span
+                            className={`rounded px-1.5 py-0.2 text-[9px] font-bold uppercase shrink-0 ${badgeStyles}`}
+                          >
+                            {badgeLabel}
+                          </span>
+                          <div className="flex-1 min-w-0">
+                            <span
+                              className={
+                                log.level === 'error' ? 'text-[#ff3e6c]' : 'text-white/80'
+                              }
+                            >
+                              {log.message}
+                            </span>
+                            {log.details && (
+                              <span className="ml-1.5 text-white/40 text-[10px]">
+                                ({log.details})
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+            </div>
           ) : (
             <div className="space-y-4 text-xs text-white/70">
               <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-center space-y-2">

@@ -62,6 +62,12 @@ export interface ElectronAPI {
   requestFileDownloadFromMobile: (data: { fileId: string; channelName: string; fileName: string }) => Promise<boolean>;
   onFileReceivedFromMobile: (callback: (data: any) => void) => () => void;
   onFileProgress: (callback: (data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }) => void) => () => void;
+  sendNetTestPing: (data: { seq: number; timestamp: number; origin: string }) => Promise<boolean>;
+  sendNetTestPong: (data: { seq: number; originTimestamp: number; replyTimestamp: number; origin: string }) => Promise<boolean>;
+  broadcastDirectEvent: (data: { eventType: string; data: any }) => Promise<boolean>;
+  onNetTestPing: (callback: (data: { seq: number; timestamp: number; origin: string }) => void) => () => void;
+  onNetTestPong: (callback: (data: { seq: number; originTimestamp: number; replyTimestamp: number; origin: string }) => void) => () => void;
+  onDirectEvent: (callback: (data: { eventType: string; data: any }) => void) => () => void;
 }
 
 declare global {

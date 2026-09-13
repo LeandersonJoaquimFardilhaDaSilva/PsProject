@@ -32,15 +32,31 @@ function sanitizeName(name) {
 
 function startSyncServer(options = {}) {
   let port = options.port || 54321;
-  let token = options.token || crypto.randomBytes(8).toString('hex');
   const documentsPath = options.documentsPath || path.join(os.homedir(), 'Documents');
   const baseFilesPath = path.join(documentsPath, 'PsProject', 'channels');
+  const tokenFilePath = path.join(documentsPath, 'PsProject', 'sync_token.txt');
 
   // Garante a existência da pasta base de documentos
   try {
     fs.mkdirSync(baseFilesPath, { recursive: true });
   } catch (err) {
     console.error('[SyncServer] Erro ao criar diretório base PsProject:', err);
+  }
+
+  // Token persistente em disco para evitar que reinicializações do PC invalidem o pareamento do celular
+  let token = options.token;
+  if (!token) {
+    try {
+      if (fs.existsSync(tokenFilePath)) {
+        token = fs.readFileSync(tokenFilePath, 'utf8').trim();
+      }
+    } catch {}
+  }
+  if (!token || token.length < 8) {
+    token = crypto.randomBytes(8).toString('hex');
+    try {
+      fs.writeFileSync(tokenFilePath, token, 'utf8');
+    } catch {}
   }
 
   const fileRegistry = new Map();
@@ -51,6 +67,9 @@ function startSyncServer(options = {}) {
   const onClientConnected = options.onClientConnected || (() => {});
   const onFileReceived = options.onFileReceived || (() => {});
   const onFileProgress = options.onFileProgress || (() => {});
+  const onNetTestPing = options.onNetTestPing || (() => {});
+  const onNetTestPong = options.onNetTestPong || (() => {});
+  const onDirectEvent = options.onDirectEvent || (() => {});
 
   // Servidor HTTP
   const server = http.createServer(async (req, res) => {
@@ -349,6 +368,18 @@ function startSyncServer(options = {}) {
           );
         } else if (data.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+        } else if (data.type === 'direct_event') {
+          // Evento granular em tempo real (< 10ms)
+          onDirectEvent(data);
+          broadcastWs(data, ws);
+        } else if (data.type === 'net_ping') {
+          // Sinal de Ping do Teste de Rede
+          onNetTestPing(data);
+          broadcastWs(data, ws);
+        } else if (data.type === 'net_pong') {
+          // Sinal de Pong do Teste de Rede
+          onNetTestPong(data);
+          broadcastWs(data, ws);
         } else if (data.type === 'request_file_transfer') {
           // Repassa pedido de transferência de arquivo para outros dispositivos conectados
           broadcastWs(data, ws);
@@ -427,6 +458,9 @@ function startSyncServer(options = {}) {
         }),
         regenerateToken: () => {
           token = crypto.randomBytes(8).toString('hex');
+          try {
+            fs.writeFileSync(tokenFilePath, token, 'utf8');
+          } catch {}
           return token;
         },
       });

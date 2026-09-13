@@ -1,6 +1,7 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { Sparkles } from 'lucide-react';
 import { useFlowStore } from '@/hooks/useFlowStore';
+import { useNetworkTest } from '@/hooks/useNetworkTest';
 import { Sidebar } from '@/components/Sidebar';
 import { TitleBar } from '@/components/TitleBar';
 import { FlowCard } from '@/components/FlowCard';
@@ -62,6 +63,33 @@ export function App() {
   const activeChannel = store.channels.find((c) => c.id === store.activeChannelId) || null;
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
 
+  const networkTest = useNetworkTest({
+    isElectron,
+    onSendPing: (data) => {
+      if (isElectron && window.electronAPI?.sendNetTestPing) {
+        window.electronAPI.sendNetTestPing(data);
+        return true;
+      }
+      if (wsClientRef.current) {
+        return wsClientRef.current.sendNetPing(data.seq, 'mobile');
+      }
+      return false;
+    },
+    onSendPong: (data) => {
+      if (isElectron && window.electronAPI?.sendNetTestPong) {
+        window.electronAPI.sendNetTestPong(data);
+        return true;
+      }
+      if (wsClientRef.current) {
+        return wsClientRef.current.sendNetPong(data.seq, data.originTimestamp, 'mobile');
+      }
+      return false;
+    },
+  });
+
+  const networkTestRef = useRef(networkTest);
+  networkTestRef.current = networkTest;
+
   function broadcastDataChange() {
     if (window.electronAPI?.broadcastSyncPush) {
       window.electronAPI.broadcastSyncPush({
@@ -70,6 +98,14 @@ export function App() {
       });
     } else {
       wsClientRef.current?.sendSyncRequest(storeRef.current.getSyncPayload());
+    }
+  }
+
+  function broadcastDirectEvent(eventType: string, data: any) {
+    if (window.electronAPI?.broadcastDirectEvent) {
+      window.electronAPI.broadcastDirectEvent({ eventType, data });
+    } else {
+      wsClientRef.current?.sendDirectEvent(eventType, data);
     }
   }
 
@@ -186,11 +222,28 @@ export function App() {
       }
     });
 
+    const cleanupPing = window.electronAPI.onNetTestPing?.((data) => {
+      networkTestRef.current.handleIncomingPing(data);
+    });
+    const cleanupPong = window.electronAPI.onNetTestPong?.((data) => {
+      networkTestRef.current.handleIncomingPong(data);
+    });
+    const cleanupDirect = window.electronAPI.onDirectEvent?.((event) => {
+      if (event.eventType === 'new_flow_item' && event.data) {
+        storeRef.current.addFlowDirect(event.data);
+      } else if (event.eventType === 'delete_flow_item' && event.data?.id) {
+        storeRef.current.deleteFlow(event.data.id);
+      }
+    });
+
     return () => {
       cleanup();
       cleanupClient?.();
       cleanupProgress?.();
       cleanupFile?.();
+      cleanupPing?.();
+      cleanupPong?.();
+      cleanupDirect?.();
     };
   }, []);
 
@@ -267,6 +320,22 @@ export function App() {
             isSuccess: prog.percent >= 100,
           },
         }));
+      },
+      // onDirectEvent
+      (event) => {
+        if (event.eventType === 'new_flow_item' && event.data) {
+          storeRef.current.addFlowDirect(event.data);
+        } else if (event.eventType === 'delete_flow_item' && event.data?.id) {
+          storeRef.current.deleteFlow(event.data.id);
+        }
+      },
+      // onNetPing
+      (data) => {
+        networkTestRef.current.handleIncomingPing(data);
+      },
+      // onNetPong
+      (data) => {
+        networkTestRef.current.handleIncomingPong(data);
       }
     );
 
@@ -362,6 +431,7 @@ export function App() {
     }
 
     // Push instantâneo via WebSocket
+    broadcastDirectEvent('new_flow_item', item);
     broadcastDataChange();
   }
 
@@ -526,6 +596,7 @@ export function App() {
       ],
     });
 
+    broadcastDirectEvent('new_flow_item', item);
     broadcastDataChange();
     return item;
   }
@@ -533,7 +604,7 @@ export function App() {
   // Envio de Texto simples
   function handleSendText(text: string) {
     if (!activeChannel) return;
-    store.addFlow({
+    const item = store.addFlow({
       type: 'text',
       channelId: activeChannel.id,
       text,
@@ -546,13 +617,14 @@ export function App() {
       ],
     });
 
+    broadcastDirectEvent('new_flow_item', item);
     broadcastDataChange();
   }
 
   // Envio de Imagem
   function handleSendImage(imageData: string, imageName: string) {
     if (!activeChannel) return;
-    store.addFlow({
+    const item = store.addFlow({
       type: 'image',
       channelId: activeChannel.id,
       imageData,
@@ -566,6 +638,14 @@ export function App() {
       ],
     });
 
+    broadcastDirectEvent('new_flow_item', item);
+    broadcastDataChange();
+  }
+
+  // Exclusão de Item com propagação instantânea
+  function handleDeleteFlow(id: string) {
+    store.deleteFlow(id);
+    broadcastDirectEvent('delete_flow_item', { id });
     broadcastDataChange();
   }
 
@@ -608,6 +688,10 @@ export function App() {
       <SettingsModal
         isOpen={isSettingsModalOpen}
         onClose={() => setIsSettingsModalOpen(false)}
+        networkTest={networkTest}
+        isWsConnected={isWsConnected}
+        isElectron={isElectron}
+        serverUrl={loadSyncConfig()?.serverUrl}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -659,7 +743,7 @@ export function App() {
                   <FlowCard
                     key={item.id}
                     item={item}
-                    onDelete={store.deleteFlow}
+                    onDelete={handleDeleteFlow}
                     onTogglePin={store.togglePin}
                     onUpdateImage={store.updateFlowImage}
                     onDownloadItem={handleDownloadItem}

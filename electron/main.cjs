@@ -237,6 +237,25 @@ ipcMain.handle('request-file-download-from-mobile', (_, { fileId, channelName, f
       channelName,
       fileName,
     });
+ipcMain.handle('send-net-test-ping', (_, data) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({ type: 'net_ping', ...data });
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('send-net-test-pong', (_, data) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({ type: 'net_pong', ...data });
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('broadcast-direct-event', (_, data) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({ type: 'direct_event', ...data });
     return true;
   }
   return false;
@@ -254,6 +273,21 @@ app.whenReady().then(async () => {
       onFileProgress: (progressInfo) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('file-transfer-progress', progressInfo);
+        }
+      },
+      onNetTestPing: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('net-test-ping-received', data);
+        }
+      },
+      onNetTestPong: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('net-test-pong-received', data);
+        }
+      },
+      onDirectEvent: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('direct-event-received', data);
         }
       },
       onSyncRequest: async (payload) => {

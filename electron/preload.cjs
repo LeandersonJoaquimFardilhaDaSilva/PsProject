@@ -55,4 +55,28 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('file-transfer-progress', subscription);
     };
   },
+  sendNetTestPing: (data) => ipcRenderer.invoke('send-net-test-ping', data),
+  sendNetTestPong: (data) => ipcRenderer.invoke('send-net-test-pong', data),
+  broadcastDirectEvent: (data) => ipcRenderer.invoke('broadcast-direct-event', data),
+  onNetTestPing: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('net-test-ping-received', subscription);
+    return () => {
+      ipcRenderer.removeListener('net-test-ping-received', subscription);
+    };
+  },
+  onNetTestPong: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('net-test-pong-received', subscription);
+    return () => {
+      ipcRenderer.removeListener('net-test-pong-received', subscription);
+    };
+  },
+  onDirectEvent: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('direct-event-received', subscription);
+    return () => {
+      ipcRenderer.removeListener('direct-event-received', subscription);
+    };
+  },
 });

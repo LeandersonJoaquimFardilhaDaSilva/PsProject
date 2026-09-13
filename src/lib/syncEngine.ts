@@ -122,6 +122,9 @@ export class WebSocketSyncClient {
   private onStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void;
   private onRequestFileTransfer?: (data: { fileId: string; channelName: string; fileName: string }) => void;
   private onFileProgress?: (data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }) => void;
+  private onDirectEvent?: (data: { eventType: string; data: any }) => void;
+  private onNetPing?: (data: { seq: number; timestamp: number; origin: string }) => void;
+  private onNetPong?: (data: { seq: number; originTimestamp: number; replyTimestamp: number; origin: string }) => void;
   private reconnectTimer: any = null;
   private pingInterval: any = null;
   private lastPongTime = Date.now();
@@ -133,7 +136,10 @@ export class WebSocketSyncClient {
     onDataUpdated: (data: any) => void,
     onStatusChange: (status: 'connected' | 'connecting' | 'disconnected') => void,
     onRequestFileTransfer?: (data: { fileId: string; channelName: string; fileName: string }) => void,
-    onFileProgress?: (data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }) => void
+    onFileProgress?: (data: { fileId: string; percent: number; speed?: string; loaded?: number; total?: number }) => void,
+    onDirectEvent?: (data: { eventType: string; data: any }) => void,
+    onNetPing?: (data: { seq: number; timestamp: number; origin: string }) => void,
+    onNetPong?: (data: { seq: number; originTimestamp: number; replyTimestamp: number; origin: string }) => void
   ) {
     this.serverUrl = serverUrl;
     this.token = token;
@@ -141,7 +147,22 @@ export class WebSocketSyncClient {
     this.onStatusChange = onStatusChange;
     this.onRequestFileTransfer = onRequestFileTransfer;
     this.onFileProgress = onFileProgress;
+    this.onDirectEvent = onDirectEvent;
+    this.onNetPing = onNetPing;
+    this.onNetPong = onNetPong;
     this.connect();
+  }
+
+  setNetTestHandlers(
+    onNetPing?: (data: { seq: number; timestamp: number; origin: string }) => void,
+    onNetPong?: (data: { seq: number; originTimestamp: number; replyTimestamp: number; origin: string }) => void
+  ) {
+    this.onNetPing = onNetPing;
+    this.onNetPong = onNetPong;
+  }
+
+  setDirectEventHandler(handler?: (data: { eventType: string; data: any }) => void) {
+    this.onDirectEvent = handler;
   }
 
   connect() {
@@ -203,6 +224,12 @@ export class WebSocketSyncClient {
             this.onRequestFileTransfer?.(msg);
           } else if (msg.type === 'file_transfer_progress') {
             this.onFileProgress?.(msg);
+          } else if (msg.type === 'direct_event') {
+            this.onDirectEvent?.(msg);
+          } else if (msg.type === 'net_ping') {
+            this.onNetPing?.(msg);
+          } else if (msg.type === 'net_pong') {
+            this.onNetPong?.(msg);
           }
         } catch (err) {
           console.error('[WebSocketSync] Erro ao ler mensagem recebida:', err);
@@ -229,6 +256,30 @@ export class WebSocketSyncClient {
   sendSyncRequest(payload: any): boolean {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify({ type: 'sync_request', payload }));
+      return true;
+    }
+    return false;
+  }
+
+  sendDirectEvent(eventType: string, data: any): boolean {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'direct_event', eventType, data }));
+      return true;
+    }
+    return false;
+  }
+
+  sendNetPing(seq: number, origin: string = 'mobile'): boolean {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'net_ping', seq, timestamp: Date.now(), origin }));
+      return true;
+    }
+    return false;
+  }
+
+  sendNetPong(seq: number, originTimestamp: number, origin: string = 'mobile'): boolean {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify({ type: 'net_pong', seq, originTimestamp, replyTimestamp: Date.now(), origin }));
       return true;
     }
     return false;
