@@ -1,8 +1,8 @@
 import type { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
-  appId: 'com.flow.organizer.mobile',
-  appName: 'Flow',
+  appId: 'com.tove.organizer.mobile',
+  appName: 'Tove',
   webDir: '../dist',
   bundledWebRuntime: false,
   server: {

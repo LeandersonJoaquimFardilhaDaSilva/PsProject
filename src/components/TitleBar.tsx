@@ -76,7 +76,7 @@ export function TitleBar({
           </button>
         )}
         <span className="truncate text-xs font-medium text-white/60">
-          Flow {channel && `· ${channel.name}`}
+          Tove {channel && `· ${channel.name}`}
         </span>
       </div>
 

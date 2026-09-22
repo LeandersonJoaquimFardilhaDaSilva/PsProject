@@ -1,8 +1,8 @@
 {
-  "name": "flow-desktop",
+  "name": "tove-desktop",
   "private": true,
   "version": "1.0.0",
-  "description": "Flow — Links, Textos e Imagens",
+  "description": "Tove — Transfer, Organize, Visualize, Everywhere",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -49,8 +49,8 @@
     "wait-on": "^9.1.0"
   },
   "build": {
-    "appId": "com.flow.desktop",
-    "productName": "Flow",
+    "appId": "com.tove.desktop",
+    "productName": "Tove",
     "directories": {
       "output": "dist-electron"
     },

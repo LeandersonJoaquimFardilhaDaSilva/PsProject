@@ -57,14 +57,16 @@ function getMimeType(filePath) {
 function startSyncServer(options = {}) {
   let port = options.port || 54321;
   const documentsPath = options.documentsPath || path.join(os.homedir(), 'Documents');
-  const baseFilesPath = path.join(documentsPath, 'PsProject', 'channels');
-  const tokenFilePath = path.join(documentsPath, 'PsProject', 'sync_token.txt');
+  const baseFilesPath = path.join(documentsPath, 'Tove', 'channels');
+  const legacyFilesPath = path.join(documentsPath, 'PsProject', 'channels');
+  const tokenFilePath = path.join(documentsPath, 'Tove', 'sync_token.txt');
+  const legacyTokenFilePath = path.join(documentsPath, 'PsProject', 'sync_token.txt');
 
   // Garante a existência da pasta base de documentos
   try {
     fs.mkdirSync(baseFilesPath, { recursive: true });
   } catch (err) {
-    console.error('[SyncServer] Erro ao criar diretório base PsProject:', err);
+    console.error('[SyncServer] Erro ao criar diretório base Tove:', err);
   }
 
   // Token persistente em disco para evitar que reinicializações do PC invalidem o pareamento do celular
@@ -73,6 +75,8 @@ function startSyncServer(options = {}) {
     try {
       if (fs.existsSync(tokenFilePath)) {
         token = fs.readFileSync(tokenFilePath, 'utf8').trim();
+      } else if (fs.existsSync(legacyTokenFilePath)) {
+        token = fs.readFileSync(legacyTokenFilePath, 'utf8').trim();
       }
     } catch {}
   }
@@ -84,10 +88,12 @@ function startSyncServer(options = {}) {
   }
 
   const fileRegistry = new Map();
-  const fileRegistryPath = path.join(documentsPath, 'PsProject', 'file_registry.json');
+  const fileRegistryPath = path.join(documentsPath, 'Tove', 'file_registry.json');
+  const legacyFileRegistryPath = path.join(documentsPath, 'PsProject', 'file_registry.json');
   try {
-    if (fs.existsSync(fileRegistryPath)) {
-      const parsed = JSON.parse(fs.readFileSync(fileRegistryPath, 'utf8'));
+    const regPathToRead = fs.existsSync(fileRegistryPath) ? fileRegistryPath : legacyFileRegistryPath;
+    if (fs.existsSync(regPathToRead)) {
+      const parsed = JSON.parse(fs.readFileSync(regPathToRead, 'utf8'));
       for (const [k, v] of Object.entries(parsed)) {
         if (v && typeof v === 'object' && v.originalPath && fs.existsSync(v.originalPath)) {
           fileRegistry.set(k, v);
@@ -274,11 +280,14 @@ function startSyncServer(options = {}) {
         targetFilePath = directPath;
       }
 
-      // 3. Fallback: busca na pasta Documents/PsProject/channels/[channelName]/[fileName]
+      // 3. Fallback: busca na pasta Documents/Tove/channels/[channelName]/[fileName] ou PsProject legado
       if (!targetFilePath && rawFileName) {
         const fallbackPath = path.join(baseFilesPath, sanitizeName(channelName), sanitizeName(rawFileName));
+        const legacyFallbackPath = path.join(legacyFilesPath, sanitizeName(channelName), sanitizeName(rawFileName));
         if (fs.existsSync(fallbackPath)) {
           targetFilePath = fallbackPath;
+        } else if (fs.existsSync(legacyFallbackPath)) {
+          targetFilePath = legacyFallbackPath;
         }
       }
 

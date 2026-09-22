@@ -602,7 +602,7 @@ export function App() {
         store.addFlowLog(item.id, {
           timestamp: Date.now(),
           level: 'success',
-          message: `Imagem salva em Documents/PsProject/channels/${channelName}`,
+          message: `Imagem salva em Documents/Tove/channels/${channelName}`,
           details: `Caminho: ${saved.filePath}`,
         });
 
@@ -660,7 +660,7 @@ export function App() {
           store.addFlowLog(item.id, {
             timestamp: Date.now(),
             level: 'success',
-            message: `Arquivo baixado para Documents/PsProject/channels/${channelName}`,
+            message: `Arquivo baixado para Documents/Tove/channels/${channelName}`,
             details: `Caminho: ${res.filePath} (${res.speed})`,
           });
 
@@ -944,7 +944,7 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       <div className="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff]">
         <Sparkles size={28} className="text-white" />
       </div>
-      <h2 className="mb-2 text-xl font-bold text-white">Bem-vindo ao Flow</h2>
+      <h2 className="mb-2 text-xl font-bold text-white">Bem-vindo ao Tove</h2>
       <p className="mb-6 max-w-sm text-sm text-white/50">
         Crie canais para organizar seus links, arquivos, textos e imagens por assunto. Tudo fica salvo
         localmente neste dispositivo.

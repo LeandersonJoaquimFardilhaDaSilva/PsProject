@@ -35,9 +35,9 @@ export function Sidebar({
       <div className="flex items-center justify-between px-5 py-4">
         <div className="flex items-center gap-2">
           <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff]">
-            <span className="text-sm font-black text-white">F</span>
+            <span className="text-sm font-black text-white">T</span>
           </div>
-          <span className="text-lg font-bold tracking-tight text-white">Flow</span>
+          <span className="text-lg font-bold tracking-tight text-white">Tove</span>
         </div>
         {onCloseMobile && (
           <button

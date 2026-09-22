@@ -4,7 +4,7 @@ android {
     namespace = "com.flow.organizer.mobile"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.flow.organizer.mobile"
+        applicationId "com.tove.organizer.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

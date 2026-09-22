@@ -103,7 +103,7 @@ export function getFileCategory(fileName: string): {
 }
 
 /**
- * Salva um arquivo localmente na pasta Documents/PsProject/channels/[channelName]
+ * Salva um arquivo localmente na pasta Documents/Tove/channels/[channelName]
  * (Acionado apenas quando o usuário clica no botão de Download)
  */
 export async function saveLocalFile(
@@ -130,7 +130,7 @@ export async function saveLocalFile(
   if (isMobile) {
     // Mobile Android: Salva via Capacitor Filesystem no diretório Documents
     try {
-      const folderPath = `PsProject/channels/${safeChannel}`;
+      const folderPath = `Tove/channels/${safeChannel}`;
       await Filesystem.mkdir({
         directory: Directory.Documents,
         path: folderPath,
@@ -217,7 +217,7 @@ export async function downloadFileWithProgress(
   if (Capacitor.isNativePlatform()) {
     const safeChannel = sanitizeFileName(channelName || 'Geral');
     const safeFile = sanitizeFileName(fileName);
-    const folderPath = `PsProject/channels/${safeChannel}`;
+    const folderPath = `Tove/channels/${safeChannel}`;
 
     await Filesystem.mkdir({
       directory: Directory.Documents,

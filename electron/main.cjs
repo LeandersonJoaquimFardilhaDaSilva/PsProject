@@ -8,6 +8,7 @@ let syncServerInstance = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
+    title: 'Tove',
     width: 1100,
     height: 750,
     minWidth: 840,
@@ -166,7 +167,7 @@ ipcMain.handle('regenerate-sync-token', () => {
 // Handlers de Arquivos no Diretório Documents (v0.3.0)
 ipcMain.handle('get-documents-folder', () => {
   const docs = app.getPath('documents');
-  const target = path.join(docs, 'PsProject', 'channels');
+  const target = path.join(docs, 'Tove', 'channels');
   if (!fs.existsSync(target)) {
     try {
       fs.mkdirSync(target, { recursive: true });
@@ -181,7 +182,7 @@ ipcMain.handle('save-file-to-documents', async (_, { channelName, fileName, buff
   const docs = app.getPath('documents');
   const safeChannel = sanitizeName(channelName || 'Geral');
   const safeFile = sanitizeName(fileName || `arquivo_${Date.now()}`);
-  const targetDir = path.join(docs, 'PsProject', 'channels', safeChannel);
+  const targetDir = path.join(docs, 'Tove', 'channels', safeChannel);
 
   if (!fs.existsSync(targetDir)) {
     fs.mkdirSync(targetDir, { recursive: true });

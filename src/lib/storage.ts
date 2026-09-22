@@ -1,11 +1,14 @@
 import type { Channel, FlowItem } from '@/types';
 
-const CHANNELS_KEY = 'flow_channels';
-const FLOWS_KEY = 'flow_items';
+const CHANNELS_KEY = 'tove_channels';
+const FLOWS_KEY = 'tove_items';
+const LEGACY_CHANNELS_KEY = 'flow_channels';
+const LEGACY_FLOWS_KEY = 'flow_items';
 
-function read<T>(key: string, fallback: T): T {
+function read<T>(key: string, fallback: T, legacyKey?: string): T {
   try {
-    const raw = localStorage.getItem(key);
+    let raw = localStorage.getItem(key);
+    if (!raw && legacyKey) raw = localStorage.getItem(legacyKey);
     if (!raw) return fallback;
     return JSON.parse(raw) as T;
   } catch {
@@ -13,9 +16,10 @@ function read<T>(key: string, fallback: T): T {
   }
 }
 
-function readArray<T>(key: string, fallback: T[]): T[] {
+function readArray<T>(key: string, fallback: T[], legacyKey?: string): T[] {
   try {
-    const raw = localStorage.getItem(key);
+    let raw = localStorage.getItem(key);
+    if (!raw && legacyKey) raw = localStorage.getItem(legacyKey);
     if (!raw) return fallback;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) ? (parsed as T[]) : fallback;
@@ -33,7 +37,7 @@ function write(key: string, value: unknown) {
 }
 
 export function loadChannels(): Channel[] {
-  return readArray<Channel>(CHANNELS_KEY, []);
+  return readArray<Channel>(CHANNELS_KEY, [], LEGACY_CHANNELS_KEY);
 }
 
 export function saveChannels(channels: Channel[]) {
@@ -42,7 +46,7 @@ export function saveChannels(channels: Channel[]) {
 }
 
 export function loadFlows(): FlowItem[] {
-  return readArray<FlowItem>(FLOWS_KEY, []);
+  return readArray<FlowItem>(FLOWS_KEY, [], LEGACY_FLOWS_KEY);
 }
 
 export function saveFlows(flows: FlowItem[]) {
@@ -50,11 +54,13 @@ export function saveFlows(flows: FlowItem[]) {
   write(FLOWS_KEY, safe);
 }
 
-const DELETED_CHANNELS_KEY = 'flow_deleted_channels';
-const DELETED_FLOWS_KEY = 'flow_deleted_flows';
+const DELETED_CHANNELS_KEY = 'tove_deleted_channels';
+const DELETED_FLOWS_KEY = 'tove_deleted_flows';
+const LEGACY_DELETED_CHANNELS_KEY = 'flow_deleted_channels';
+const LEGACY_DELETED_FLOWS_KEY = 'flow_deleted_flows';
 
 export function loadDeletedChannelIds(): string[] {
-  return readArray<string>(DELETED_CHANNELS_KEY, []);
+  return readArray<string>(DELETED_CHANNELS_KEY, [], LEGACY_DELETED_CHANNELS_KEY);
 }
 
 export function saveDeletedChannelIds(ids: string[]) {
@@ -71,7 +77,7 @@ export function addDeletedChannelId(id: string) {
 }
 
 export function loadDeletedFlowIds(): string[] {
-  return readArray<string>(DELETED_FLOWS_KEY, []);
+  return readArray<string>(DELETED_FLOWS_KEY, [], LEGACY_DELETED_FLOWS_KEY);
 }
 
 export function saveDeletedFlowIds(ids: string[]) {
