@@ -3,6 +3,7 @@
   "private": true,
   "version": "1.0.0",
   "description": "Tove — Transfer, Organize, Visualize, Everywhere",
+  "author": "Tove Team",
   "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
