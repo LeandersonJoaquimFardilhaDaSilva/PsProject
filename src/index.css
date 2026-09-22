@@ -38,3 +38,10 @@
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.2);
 }
+
+@media (hover: none) and (pointer: coarse) {
+  /* Remove sticky hover transitions on mobile touch */
+  *:hover {
+    transition-duration: 0ms !important;
+  }
+}

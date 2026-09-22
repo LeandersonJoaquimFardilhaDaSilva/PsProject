@@ -10,11 +10,9 @@ import {
   Pause,
   RotateCcw,
   ExternalLink,
-  Info,
   Clock,
   CheckCircle2,
   XCircle,
-  Sparkles,
   Zap,
   Activity,
   Radio,
@@ -22,6 +20,7 @@ import {
   Terminal,
   Copy,
   Trash2,
+  Sliders,
 } from 'lucide-react';
 import {
   loadPreviewSettings,
@@ -34,6 +33,11 @@ import {
   type ProviderTestResult,
   type LinkPreview,
 } from '@/lib/linkPreview';
+import {
+  loadDevToolsSettings,
+  saveDevToolsSettings,
+  type DevToolsSettings,
+} from '@/lib/devTools';
 import type { NetworkTestState } from '@/hooks/useNetworkTest';
 
 interface SettingsModalProps {
@@ -55,7 +59,8 @@ export function SettingsModal({
   serverUrl,
   activeClientsCount = 0,
 }: SettingsModalProps) {
-  const [activeTab, setActiveTab] = useState<'preview' | 'network' | 'about'>('preview');
+  const [devTools, setDevTools] = useState<DevToolsSettings>(() => loadDevToolsSettings());
+  const [activeTab, setActiveTab] = useState<'devtools' | 'preview' | 'network'>('devtools');
   const [settings, setSettings] = useState<PreviewSettings>(() => loadPreviewSettings());
   const [testUrl, setTestUrl] = useState('https://github.com');
   const [savedFeedback, setSavedFeedback] = useState(false);
@@ -74,11 +79,30 @@ export function SettingsModal({
 
   useEffect(() => {
     if (isOpen) {
+      const dt = loadDevToolsSettings();
+      setDevTools(dt);
       setSettings(loadPreviewSettings());
       setTestResults({});
       setFullTestResult(null);
     }
   }, [isOpen]);
+
+  function handleToggleDevTool(key: keyof DevToolsSettings) {
+    const updated: DevToolsSettings = {
+      ...devTools,
+      [key]: !devTools[key],
+    };
+    setDevTools(updated);
+    saveDevToolsSettings(updated);
+    triggerSaved();
+
+    if (!updated.enableMetadataTest && activeTab === 'preview') {
+      setActiveTab('devtools');
+    }
+    if (!updated.enableNetworkTest && activeTab === 'network') {
+      setActiveTab('devtools');
+    }
+  }
 
   if (!isOpen) return null;
 
@@ -191,48 +215,147 @@ export function SettingsModal({
         {/* Tabs */}
         <div className="flex border-b border-white/5 bg-[#0a0a0f] p-1.5 shrink-0 gap-1">
           <button
-            onClick={() => setActiveTab('preview')}
+            onClick={() => setActiveTab('devtools')}
             className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
-              activeTab === 'preview'
+              activeTab === 'devtools'
                 ? 'bg-white/10 text-white shadow-sm'
                 : 'text-white/40 hover:text-white/70'
             }`}
           >
-            <Link2 size={14} />
-            <span>metadata</span>
+            <Sliders size={14} />
+            <span>Dev-Tools</span>
           </button>
-          <button
-            onClick={() => setActiveTab('network')}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
-              activeTab === 'network'
-                ? 'bg-white/10 text-white shadow-sm'
-                : 'text-white/40 hover:text-white/70'
-            }`}
-          >
-            <Activity size={14} className={networkTest?.isAutoPing ? 'text-[#00e5ff] animate-pulse' : ''} />
-            <span>Teste de Rede</span>
-            {networkTest && networkTest.signalsHeard > 0 && (
-              <span className="rounded-full bg-[#00e5ff]/20 px-1.5 py-0.2 text-[10px] font-mono text-[#00e5ff]">
-                {networkTest.signalsHeard}
-              </span>
-            )}
-          </button>
-          <button
-            onClick={() => setActiveTab('about')}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
-              activeTab === 'about'
-                ? 'bg-white/10 text-white shadow-sm'
-                : 'text-white/40 hover:text-white/70'
-            }`}
-          >
-            <Info size={14} />
-            <span>Sobre o App</span>
-          </button>
+
+          {devTools.enableMetadataTest && (
+            <button
+              onClick={() => setActiveTab('preview')}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
+                activeTab === 'preview'
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              <Link2 size={14} />
+              <span>metadata</span>
+            </button>
+          )}
+
+          {devTools.enableNetworkTest && (
+            <button
+              onClick={() => setActiveTab('network')}
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2 text-xs font-medium transition ${
+                activeTab === 'network'
+                  ? 'bg-white/10 text-white shadow-sm'
+                  : 'text-white/40 hover:text-white/70'
+              }`}
+            >
+              <Activity size={14} className={networkTest?.isAutoPing ? 'text-[#00e5ff] animate-pulse' : ''} />
+              <span>Teste de Rede</span>
+              {networkTest && networkTest.signalsHeard > 0 && (
+                <span className="rounded-full bg-[#00e5ff]/20 px-1.5 py-0.2 text-[10px] font-mono text-[#00e5ff]">
+                  {networkTest.signalsHeard}
+                </span>
+              )}
+            </button>
+          )}
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6">
-          {activeTab === 'preview' ? (
+          {activeTab === 'devtools' ? (
+            <div className="space-y-4">
+              <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 sm:p-5 space-y-1.5">
+                <div className="flex items-center gap-2.5">
+                  <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff] text-white">
+                    <Sliders size={18} />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-white">Sub-menu Dev-Tools</h3>
+                    <p className="text-xs text-white/40">
+                      Ative ou desative ferramentas de teste e logs. Funcionalidades desativadas ficam ocultas.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                {/* 1. Log em cada mensagem */}
+                <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 transition hover:bg-white/[0.03]">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white">
+                      <Terminal size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-semibold text-white">Log em cada mensagem</h4>
+                      <p className="text-xs text-white/50 mt-0.5">
+                        Exibe o botão de terminal e diagnóstico em cada card de mensagem para inspecionar eventos.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleToggleDevTool('enableMessageLogs')}
+                    className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      devTools.enableMessageLogs
+                        ? 'bg-[#26de81]/20 text-[#26de81]'
+                        : 'bg-white/10 text-white/40 hover:text-white'
+                    }`}
+                  >
+                    {devTools.enableMessageLogs ? 'Ativado' : 'Desativado'}
+                  </button>
+                </div>
+
+                {/* 2. Teste de Provedores de Metadata */}
+                <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 transition hover:bg-white/[0.03]">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white">
+                      <Link2 size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-semibold text-white">Sub-menu de teste de provedores de metadata</h4>
+                      <p className="text-xs text-white/50 mt-0.5">
+                        Torna visível a aba de testes individuais e cascata de provedores de metadados de links.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleToggleDevTool('enableMetadataTest')}
+                    className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      devTools.enableMetadataTest
+                        ? 'bg-[#26de81]/20 text-[#26de81]'
+                        : 'bg-white/10 text-white/40 hover:text-white'
+                    }`}
+                  >
+                    {devTools.enableMetadataTest ? 'Ativado' : 'Desativado'}
+                  </button>
+                </div>
+
+                {/* 3. Teste de Rede */}
+                <div className="flex items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[0.02] p-4 transition hover:bg-white/[0.03]">
+                  <div className="flex items-start gap-3">
+                    <div className="mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-xl bg-white/10 text-white">
+                      <Activity size={16} />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-semibold text-white">Teste de rede</h4>
+                      <p className="text-xs text-white/50 mt-0.5">
+                        Torna visível a aba de medição de latência RTT, ping-pong de sinais e console de diagnóstico.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleToggleDevTool('enableNetworkTest')}
+                    className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-semibold transition ${
+                      devTools.enableNetworkTest
+                        ? 'bg-[#26de81]/20 text-[#26de81]'
+                        : 'bg-white/10 text-white/40 hover:text-white'
+                    }`}
+                  >
+                    {devTools.enableNetworkTest ? 'Ativado' : 'Desativado'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          ) : activeTab === 'preview' && devTools.enableMetadataTest ? (
             <>
               {/* Descrição e Playground de Teste */}
               <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 space-y-3">
@@ -470,7 +593,7 @@ export function SettingsModal({
                 </div>
               </div>
             </>
-          ) : activeTab === 'network' ? (
+          ) : activeTab === 'network' && devTools.enableNetworkTest ? (
             <div className="space-y-5">
               {/* Status da Conexão */}
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-2xl border border-white/5 bg-white/[0.02] p-4">
@@ -723,28 +846,7 @@ export function SettingsModal({
                 </div>
               </div>
             </div>
-          ) : (
-            <div className="space-y-4 text-xs text-white/70">
-              <div className="rounded-2xl border border-white/10 bg-white/[0.02] p-5 text-center space-y-2">
-                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl bg-gradient-to-br from-[#00e5ff] to-[#ff3e6c]">
-                  <Sparkles size={22} className="text-white" />
-                </div>
-                <h3 className="text-base font-bold text-white">Flow Organizer</h3>
-                <p className="text-white/40">Versão 0.2.0 — Conexão entre aparelhos</p>
-              </div>
-
-              <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 space-y-3">
-                <h4 className="font-semibold text-white">Recursos desta versão:</h4>
-                <ul className="space-y-1.5 list-disc pl-4 text-white/60">
-                  <li>Sincronização bidirecional em duas vias via QR Code (PC ↔ Celular).</li>
-                  <li>Reconciliação inteligente com suporte a exclusões offline (tombstones).</li>
-                  <li>Aplicativo Desktop nativo com Electron e servidor local na porta 54321.</li>
-                  <li>Aplicativo Mobile nativo para Android via Capacitor.</li>
-                  <li>Mecanismo de garimpo de metadados configurável com 4 provedores.</li>
-                </ul>
-              </div>
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
     </div>

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Link2, MessageSquare, Image as ImageIcon, Loader2, X, Paperclip, FileText } from 'lucide-react';
-import type { FlowItem, FlowType } from '@/types';
+import { Send, Loader2, X, Paperclip, Film, FileText } from 'lucide-react';
+import type { FlowItem } from '@/types';
 import { fetchLinkPreview, isUrl, normalizeUrl, getDomain } from '@/lib/linkPreview';
 import { getFileCategory, formatBytes } from '@/lib/fileTransferEngine';
 
@@ -20,7 +20,13 @@ interface ComposerProps {
   onSendFile: (file: File) => void;
 }
 
-type Mode = 'auto' | 'text';
+interface Attachment {
+  file: File;
+  kind: 'image' | 'video' | 'file';
+  previewUrl?: string;
+  name: string;
+  size: number;
+}
 
 export function Composer({
   channelId,
@@ -31,49 +37,87 @@ export function Composer({
   onSendFile,
 }: ComposerProps) {
   const [text, setText] = useState('');
-  const [mode, setMode] = useState<Mode>('auto');
   const [loading, setLoading] = useState(false);
-  const [imagePreview, setImagePreview] = useState<{ data: string; name: string } | null>(null);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
-  const genericFileRef = useRef<HTMLInputElement>(null);
+  const [attachment, setAttachment] = useState<Attachment | null>(null);
+  const attachmentInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     setText('');
-    setImagePreview(null);
-    setSelectedFile(null);
-    setMode('auto');
+    clearAttachment();
   }, [channelId]);
+
+  function clearAttachment() {
+    if (attachment?.previewUrl && attachment.kind === 'video') {
+      URL.revokeObjectURL(attachment.previewUrl);
+    }
+    setAttachment(null);
+    if (attachmentInputRef.current) {
+      attachmentInputRef.current.value = '';
+    }
+  }
+
+  function handleAttachmentChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const ext = file.name.split('.').pop()?.toLowerCase() || '';
+    const isImg = file.type.startsWith('image/') || ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'].includes(ext);
+    const isVid = file.type.startsWith('video/') || ['mp4', 'webm', 'ogg', 'mov', 'mkv'].includes(ext);
+
+    if (isImg) {
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAttachment({
+          file,
+          kind: 'image',
+          previewUrl: reader.result as string,
+          name: file.name,
+          size: file.size,
+        });
+      };
+      reader.readAsDataURL(file);
+    } else if (isVid) {
+      const url = URL.createObjectURL(file);
+      setAttachment({
+        file,
+        kind: 'video',
+        previewUrl: url,
+        name: file.name,
+        size: file.size,
+      });
+    } else {
+      setAttachment({
+        file,
+        kind: 'file',
+        name: file.name,
+        size: file.size,
+      });
+    }
+  }
 
   async function handleSend() {
     const value = text.trim();
-    if (!value && !imagePreview && !selectedFile) return;
+    if (!value && !attachment) return;
 
-    // 1. Envio de Arquivo Binário (PDF, EXE, DOC, ZIP, etc.)
-    if (selectedFile) {
-      onSendFile(selectedFile);
-      setSelectedFile(null);
+    // 1. Envio de Anexo (Imagem, Vídeo ou Arquivo Geral)
+    if (attachment) {
+      if (attachment.kind === 'image' && attachment.previewUrl) {
+        onSendImage(attachment.previewUrl, attachment.name);
+      } else {
+        onSendFile(attachment.file);
+      }
+      clearAttachment();
       setText('');
       return;
     }
 
-    // 2. Envio de Imagem
-    if (imagePreview) {
-      onSendImage(imagePreview.data, imagePreview.name);
-      setImagePreview(null);
-      setText('');
-      return;
-    }
-
-    // 3. Envio de Link com Prévia Assíncrona
-    if (mode === 'auto' && isUrl(value)) {
+    // 2. Envio de Link com Prévia Automática Assíncrona
+    if (isUrl(value)) {
       const url = normalizeUrl(value);
       const domain = getDomain(url);
 
-      // Limpa a barra de digitação na hora
       setText('');
 
-      // Cria o card imediatamente com indicador animado de carregamento
       const newItem = onSendLink(
         url,
         domain,
@@ -83,7 +127,6 @@ export function Composer({
         true
       );
 
-      // Busca assíncrona em background
       if (newItem && onUpdateFlowPreview) {
         fetchLinkPreview(url)
           .then((preview) => {
@@ -104,7 +147,7 @@ export function Composer({
       return;
     }
 
-    // 4. Envio de Texto simples
+    // 3. Envio de Texto simples
     onSendText(value);
     setText('');
   }
@@ -116,118 +159,83 @@ export function Composer({
     }
   }
 
-  function handleImage(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (!file.type.startsWith('image/')) return;
-    const reader = new FileReader();
-    reader.onload = () => {
-      setImagePreview({ data: reader.result as string, name: file.name });
-      setSelectedFile(null);
-    };
-    reader.readAsDataURL(file);
-    e.target.value = '';
-  }
-
-  function handleGenericFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setSelectedFile(file);
-    setImagePreview(null);
-  }
-
-  const showLinkHint = mode === 'auto' && isUrl(text.trim());
+  const showLinkHint = !attachment && isUrl(text.trim());
 
   return (
     <div className="border-t border-white/5 bg-[#0d0d12] px-4 py-3">
-      {/* Chip de Prévia de Imagem */}
-      {imagePreview && (
-        <div className="mb-2 inline-flex items-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2">
-          <img src={imagePreview.data} alt="preview" className="h-10 w-10 rounded object-cover" />
-          <span className="max-w-40 truncate text-xs text-white/60">{imagePreview.name}</span>
-          <button
-            onClick={() => setImagePreview(null)}
-            className="rounded p-0.5 text-white/40 hover:text-white"
-          >
-            <X size={14} />
-          </button>
-        </div>
-      )}
+      {/* Chip de Prévia de Anexo com verificação de tipo de arquivo */}
+      {attachment && (
+        <div className="mb-2.5 inline-flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/5 p-2 pr-3 shadow-lg">
+          {attachment.kind === 'image' && attachment.previewUrl && (
+            <img
+              src={attachment.previewUrl}
+              alt="preview"
+              className="h-12 w-12 rounded-lg object-cover border border-white/10"
+            />
+          )}
 
-      {/* Chip de Prévia de Arquivo Genérico (PDF, EXE, DOC, ZIP, etc.) */}
-      {selectedFile && (
-        <div className="mb-2 inline-flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/5 px-3 py-2">
-          <div
-            className="flex h-8 w-8 items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm"
-            style={{ backgroundColor: getFileCategory(selectedFile.name).color }}
-          >
-            {getFileCategory(selectedFile.name).extension.slice(0, 4)}
+          {attachment.kind === 'video' && (
+            <div className="relative flex h-12 w-16 items-center justify-center rounded-lg bg-black/60 border border-white/10 overflow-hidden">
+              {attachment.previewUrl ? (
+                <video
+                  src={attachment.previewUrl}
+                  className="h-full w-full object-cover"
+                  muted
+                  playsInline
+                />
+              ) : (
+                <Film size={18} className="text-[#ff3e6c]" />
+              )}
+              <span className="absolute bottom-1 right-1 rounded bg-black/80 px-1 text-[9px] font-bold text-white">
+                VÍDEO
+              </span>
+            </div>
+          )}
+
+          {attachment.kind === 'file' && (
+            <div
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-xs font-bold text-white shadow-sm"
+              style={{ backgroundColor: getFileCategory(attachment.name).color }}
+            >
+              {getFileCategory(attachment.name).extension.slice(0, 4)}
+            </div>
+          )}
+
+          <div className="min-w-0 max-w-52">
+            <p className="truncate text-xs font-semibold text-white">{attachment.name}</p>
+            <p className="text-[11px] text-white/50">{formatBytes(attachment.size)}</p>
           </div>
-          <div className="min-w-0">
-            <p className="max-w-48 truncate text-xs font-medium text-white">{selectedFile.name}</p>
-            <p className="text-[11px] text-white/40">{formatBytes(selectedFile.size)}</p>
-          </div>
+
           <button
-            onClick={() => setSelectedFile(null)}
-            className="ml-1 rounded p-1 text-white/40 hover:bg-white/10 hover:text-white"
+            onClick={clearAttachment}
+            className="ml-1 rounded-lg p-1 text-white/40 hover:bg-white/10 hover:text-white transition"
+            title="Remover anexo"
           >
-            <X size={14} />
+            <X size={15} />
           </button>
         </div>
       )}
 
       <div className="flex items-end gap-2 py-0.5">
-        <div className="flex gap-1">
-          <button
-            onClick={() => setMode('auto')}
-            className={`rounded-lg p-2 transition ${
-              mode === 'auto' ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'
-            }`}
-            title="Auto (link ou texto)"
-          >
-            <Link2 size={18} />
-          </button>
-          <button
-            onClick={() => setMode('text')}
-            className={`rounded-lg p-2 transition ${
-              mode === 'text' ? 'bg-white/15 text-white' : 'text-white/40 hover:text-white/70'
-            }`}
-            title="Texto"
-          >
-            <MessageSquare size={18} />
-          </button>
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="rounded-lg p-2 text-white/40 transition hover:text-white/70"
-            title="Enviar Imagem"
-          >
-            <ImageIcon size={18} />
-          </button>
-          <button
-            onClick={() => {
-              if (genericFileRef.current) genericFileRef.current.value = '';
-              genericFileRef.current?.click();
-            }}
-            className="rounded-lg p-2 text-white/40 transition hover:text-white/70"
-            title="Enviar Arquivo (PDF, EXE, DOC, ZIP...)"
-          >
-            <Paperclip size={18} />
-          </button>
+        {/* Botão Único de Anexos */}
+        <button
+          type="button"
+          onClick={() => {
+            if (attachmentInputRef.current) attachmentInputRef.current.value = '';
+            attachmentInputRef.current?.click();
+          }}
+          className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-white/60 transition hover:bg-white/10 hover:text-white shrink-0"
+          title="Anexar arquivo, imagem ou vídeo"
+        >
+          <Paperclip size={18} />
+        </button>
 
-          <input
-            ref={fileRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImage}
-            className="hidden"
-          />
-          <input
-            ref={genericFileRef}
-            type="file"
-            onChange={handleGenericFile}
-            className="hidden"
-          />
-        </div>
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          onChange={handleAttachmentChange}
+          className="hidden"
+        />
 
         <div className="relative flex-1">
           <textarea
@@ -235,24 +243,25 @@ export function Composer({
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              selectedFile
-                ? `Pronto para enviar ${selectedFile.name}...`
-                : mode === 'text'
-                ? 'Digite uma mensagem...'
-                : ''
+              attachment
+                ? `Pronto para enviar ${attachment.name}...`
+                : 'Digite uma mensagem ou cole um link...'
             }
             rows={1}
             className="max-h-32 w-full resize-none rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white placeholder-white/30 outline-none transition focus:border-[#00e5ff]/40 focus:bg-white/10"
           />
           {showLinkHint && (
-            <span className="absolute -top-5 left-2 text-xs text-[#00e5ff]/70">Link detectado</span>
+            <span className="absolute -top-5 left-2 text-xs font-medium text-[#00e5ff]/80">
+              Link detectado automaticamente
+            </span>
           )}
         </div>
 
         <button
           onClick={handleSend}
-          disabled={loading || (!text.trim() && !imagePreview && !selectedFile)}
-          className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff] text-white transition hover:opacity-90 disabled:opacity-30 shrink-0"
+          disabled={loading || (!text.trim() && !attachment)}
+          className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff] text-white transition hover:opacity-90 disabled:opacity-30 shrink-0 shadow-lg"
+          title="Enviar"
         >
           {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
         </button>

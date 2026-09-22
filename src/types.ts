@@ -27,6 +27,7 @@ export interface FlowItem {
   fileSize?: number;
   fileType?: string;
   fileUrl?: string;
+  videoData?: string;
   transferSpeed?: string;
   isLoadingPreview?: boolean;
   logs?: FlowLogEntry[];

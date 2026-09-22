@@ -261,8 +261,20 @@ export async function tryGoogleFavicon(url: string, timeoutMs = 5000): Promise<L
   const domain = getDomain(normalized);
   const iconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
 
-  // Testa se o CDN do Google responde rapidamente
-  await withTimeout(fetch(iconUrl, { method: 'HEAD' }), timeoutMs);
+  // Validação segura de carregamento de imagem sem bloqueio de CORS
+  if (typeof window !== 'undefined' && typeof Image !== 'undefined') {
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Favicon não pôde ser carregado'));
+        img.src = iconUrl;
+      }),
+      timeoutMs
+    ).catch(() => {
+      // Ignora erro ou timeout para não impedir fallback visual
+    });
+  }
 
   const cleanName = domain.charAt(0).toUpperCase() + domain.slice(1);
   return {
@@ -332,6 +344,20 @@ export async function tryMicrolink(url: string, timeoutMs = 8000): Promise<LinkP
   };
 }
 
+function decodeHtmlEntities(str?: string): string | undefined {
+  if (!str) return undefined;
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&ndash;/g, '–')
+    .replace(/&mdash;/g, '—')
+    .trim();
+}
+
 export function parseMetaTags(html: string, url: string): LinkPreview {
   const getMeta = (names: string[]): string | undefined => {
     for (const name of names) {
@@ -352,12 +378,12 @@ export function parseMetaTags(html: string, url: string): LinkPreview {
   };
 
   const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-  const title =
+  const rawTitle =
     getMeta(['twitter:title', 'og:title']) ||
     titleMatch?.[1]?.trim() ||
     undefined;
 
-  const description =
+  const rawDescription =
     getMeta(['twitter:description', 'og:description', 'description']) ||
     undefined;
 
@@ -373,9 +399,14 @@ export function parseMetaTags(html: string, url: string): LinkPreview {
     }
   }
 
-  const siteName = getMeta(['og:site_name', 'application-name']) || getDomain(url);
+  const rawSiteName = getMeta(['og:site_name', 'application-name']) || getDomain(url);
 
-  return { title, description, image, siteName };
+  return {
+    title: decodeHtmlEntities(rawTitle),
+    description: decodeHtmlEntities(rawDescription),
+    image,
+    siteName: decodeHtmlEntities(rawSiteName),
+  };
 }
 
 function mergePreviews(...previews: LinkPreview[]): LinkPreview {

@@ -98,17 +98,30 @@ export function reconcileSyncData(local: SyncData, incoming: SyncData): SyncData
     if (!existing) {
       flowMap.set(flow.id, flow);
     } else {
-      // Mescla atualizações (pinned, image, arquivos, logs, etc.), mantendo a versão mais atual
+      // Mescla atualizações (pinned, image, arquivos, logs, metadados etc.), mantendo a versão mais completa
+      const resolvedTitle = flow.title && flow.title !== flow.url ? flow.title : existing.title;
+      const resolvedDesc = flow.description && !flow.description.includes('Buscando dados') ? flow.description : (existing.description || flow.description);
+      const resolvedImage = flow.image || existing.image;
+      const resolvedSiteName = flow.siteName || existing.siteName;
+      const resolvedLoading = (flow.isLoadingPreview === false || existing.isLoadingPreview === false)
+        ? false
+        : (flow.isLoadingPreview ?? existing.isLoadingPreview ?? false);
+
       flowMap.set(flow.id, {
         ...existing,
         ...flow,
         pinned: flow.pinned ?? existing.pinned,
-        image: flow.image || existing.image,
+        title: resolvedTitle,
+        description: resolvedDesc,
+        image: resolvedImage,
+        siteName: resolvedSiteName,
+        isLoadingPreview: resolvedLoading,
         fileName: flow.fileName || existing.fileName,
         filePath: flow.filePath || existing.filePath,
         fileSize: flow.fileSize ?? existing.fileSize,
         fileType: flow.fileType || existing.fileType,
         fileUrl: flow.fileUrl || existing.fileUrl,
+        videoData: flow.videoData || existing.videoData,
         transferSpeed: flow.transferSpeed || existing.transferSpeed,
         logs: flow.logs || existing.logs,
       });

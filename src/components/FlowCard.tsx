@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import {
   Link2,
   MessageSquare,
@@ -15,14 +15,14 @@ import {
   FolderOpen,
   Terminal,
   Zap,
-  CheckCircle2,
-  AlertCircle,
-  Clock,
   Download,
+  Film,
 } from 'lucide-react';
 import type { FlowItem, FlowLogEntry } from '@/types';
 import { getDomain, isValidImageUrl } from '@/lib/linkPreview';
-import { getFileCategory, formatBytes } from '@/lib/fileTransferEngine';
+import { getFileCategory, formatBytes, getRegisteredOriginalFile } from '@/lib/fileTransferEngine';
+import { loadDevToolsSettings } from '@/lib/devTools';
+import { loadSyncConfig } from '@/lib/syncEngine';
 
 interface FlowCardProps {
   item: FlowItem;
@@ -40,6 +40,12 @@ interface FlowCardProps {
   };
 }
 
+function isVideoFile(fileName?: string, fileType?: string): boolean {
+  if (fileType && ['mp4', 'webm', 'ogg', 'mov', 'mkv', 'video'].includes(fileType.toLowerCase())) return true;
+  if (!fileName) return false;
+  return /\.(mp4|webm|ogg|mov|mkv)$/i.test(fileName);
+}
+
 export function FlowCard({
   item,
   onDelete,
@@ -54,9 +60,79 @@ export function FlowCard({
   const [imageUrl, setImageUrl] = useState('');
   const [imageError, setImageError] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
+  const [devTools, setDevTools] = useState(() => loadDevToolsSettings());
+  const [resolvedVideoUrl, setResolvedVideoUrl] = useState<string | null>(null);
 
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
   const hasErrors = item.logs?.some((l) => l.level === 'error');
+  const isVideo = item.type === 'file' && isVideoFile(item.fileName, item.fileType);
+
+  // Escuta alterações de configurações do Dev-Tools em tempo real
+  useEffect(() => {
+    const handleDevToolsChange = () => {
+      setDevTools(loadDevToolsSettings());
+    };
+    window.addEventListener('flow-devtools-changed', handleDevToolsChange);
+    return () => window.removeEventListener('flow-devtools-changed', handleDevToolsChange);
+  }, []);
+
+  // Resolução de URL para reprodução de vídeo no app (Player Nativo)
+  useEffect(() => {
+    if (!isVideo) return;
+
+    // 1. Arquivo original registrado em memória (enviado neste dispositivo)
+    const reg = getRegisteredOriginalFile(item.id);
+    if (reg?.file) {
+      const u = URL.createObjectURL(reg.file);
+      setResolvedVideoUrl(u);
+      return () => URL.revokeObjectURL(u);
+    }
+
+    // 2. Dado em base64/URL direta
+    if (item.videoData) {
+      setResolvedVideoUrl(item.videoData);
+      return;
+    }
+
+    // 3. Mobile Capacitor (arquivo local baixado)
+    if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform?.() && item.filePath) {
+      try {
+        const src = (window as any).Capacitor.convertFileSrc(item.filePath);
+        setResolvedVideoUrl(src);
+        return;
+      } catch {
+        // continua
+      }
+    }
+
+    // 4. Stream do servidor via HTTP Range
+    const syncConfig = loadSyncConfig();
+    if (syncConfig?.serverUrl && syncConfig.token && item.fileName) {
+      let base = syncConfig.serverUrl.replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(base)) base = `http://${base}`;
+      setResolvedVideoUrl(
+        `${base}/api/files/download?fileId=${encodeURIComponent(item.id)}&fileName=${encodeURIComponent(
+          item.fileName
+        )}&token=${encodeURIComponent(syncConfig.token)}&stream=1`
+      );
+      return;
+    }
+
+    // 5. Desktop Electron: busca stream local na porta do syncServer
+    if (isElectron && item.filePath && window.electronAPI?.getSyncInfo) {
+      window.electronAPI.getSyncInfo().then((info) => {
+        if (info?.port && info?.token) {
+          setResolvedVideoUrl(
+            `http://127.0.0.1:${info.port}/api/files/download?fileId=${encodeURIComponent(
+              item.id
+            )}&filePath=${encodeURIComponent(item.filePath!)}&token=${encodeURIComponent(
+              info.token
+            )}&stream=1`
+          );
+        }
+      });
+    }
+  }, [item.id, item.filePath, item.fileName, item.videoData, isVideo, isElectron]);
 
   function copyContent() {
     const value =
@@ -98,14 +174,14 @@ export function FlowCard({
 
   return (
     <>
-      <div className="group relative animate-[flowIn_0.4s_ease-out] rounded-2xl border border-white/10 bg-[#16161e] p-4 transition hover:border-white/20 hover:bg-[#1a1a24]">
+      <div className="group relative w-full max-w-full overflow-hidden animate-[flowIn_0.4s_ease-out] rounded-2xl border border-white/10 bg-[#16161e] p-3.5 sm:p-4 transition hover:border-white/20 hover:bg-[#1a1a24]">
         {item.pinned && (
           <div className="absolute -left-1 top-4 h-8 w-1 rounded-full bg-gradient-to-b from-[#ff3e6c] to-[#00e5ff]" />
         )}
 
         {/* Top Header do Card */}
         <div className="mb-2.5 flex items-center gap-2">
-          <TypeBadge type={item.type} />
+          <TypeBadge type={isVideo ? 'video' : item.type} />
           <span className="text-xs text-white/30">{timeAgo(item.createdAt)}</span>
           {item.siteName && (
             <span className="truncate text-xs text-white/40">· {item.siteName}</span>
@@ -121,9 +197,9 @@ export function FlowCard({
             </span>
           )}
 
-          <div className="ml-auto flex items-center gap-1 opacity-80 group-hover:opacity-100 transition">
-            {/* Botão de Logs / Diagnóstico */}
-            {item.logs && item.logs.length > 0 && (
+          <div className="ml-auto flex items-center gap-1 opacity-90 sm:opacity-80 sm:group-hover:opacity-100 transition">
+            {/* Botão de Logs / Diagnóstico — Visível somente se ativado no Dev-Tools */}
+            {devTools.enableMessageLogs && item.logs && item.logs.length > 0 && (
               <button
                 onClick={() => setShowLogs((prev) => !prev)}
                 className={`relative rounded-lg p-1.5 transition ${
@@ -192,17 +268,20 @@ export function FlowCard({
               </button>
             )}
 
-            <button
-              onClick={() => onDelete(item.id)}
-              className="rounded-lg p-1.5 text-white/30 transition hover:text-red-400"
-              title="Excluir"
-            >
-              <Trash2 size={14} />
-            </button>
+            {/* Mensagens fixadas NÃO podem ser apagadas (botão de lixeira oculto se pinned) */}
+            {!item.pinned && (
+              <button
+                onClick={() => onDelete(item.id)}
+                className="rounded-lg p-1.5 text-white/30 transition hover:text-red-400"
+                title="Excluir"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
           </div>
         </div>
 
-        {/* 1. Card de Link */}
+        {/* 1. Card de Link — Texto Selecionável */}
         {item.type === 'link' && item.isLoadingPreview && (
           <div className="mb-3 flex h-24 items-center justify-center gap-2.5 rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 text-xs text-[#00e5ff] animate-pulse">
             <Loader2 size={16} className="animate-spin text-[#00e5ff]" />
@@ -225,7 +304,7 @@ export function FlowCard({
         )}
 
         {item.type === 'link' && !item.isLoadingPreview && !item.image && !editingImage && (
-          <div className="mb-3 flex h-32 items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/[0.02]">
+          <div className="mb-3 flex h-28 items-center justify-center rounded-xl border border-dashed border-white/15 bg-white/[0.02]">
             <button
               onClick={() => setEditingImage(true)}
               className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs text-white/40 transition hover:bg-white/5 hover:text-white/70"
@@ -291,31 +370,35 @@ export function FlowCard({
         )}
 
         {item.type === 'link' && (
-          <a
-            href={item.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            onClick={(e) => handleOpenExternalLink(e, item.url || '')}
-            className="block group/link"
-          >
-            <h3 className="mb-1 font-semibold text-white transition group-hover/link:text-[#00e5ff]">
+          <div className="block">
+            <h3 className="mb-1 font-semibold text-white select-text cursor-text leading-snug">
               {item.title}
             </h3>
             {item.description && (
-              <p className="mb-2 text-xs leading-relaxed text-white/50 line-clamp-2">
+              <p className="mb-2 text-xs leading-relaxed text-white/50 line-clamp-2 select-text cursor-text">
                 {item.description}
               </p>
             )}
-            <div className="flex items-center gap-1 text-xs text-[#00e5ff]/70">
-              <ExternalLink size={12} />
-              {getDomain(item.url || '')}
+            <div className="flex items-center gap-1.5">
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => handleOpenExternalLink(e, item.url || '')}
+                className="inline-flex items-center gap-1 text-xs text-[#00e5ff]/80 hover:text-[#00e5ff] hover:underline transition select-text"
+              >
+                <ExternalLink size={12} className="shrink-0" />
+                <span className="truncate max-w-xs">{getDomain(item.url || '')}</span>
+              </a>
             </div>
-          </a>
+          </div>
         )}
 
-        {/* 2. Card de Texto Simples */}
+        {/* 2. Card de Texto Simples — Texto Selecionável */}
         {item.type === 'text' && (
-          <p className="whitespace-pre-wrap break-words text-sm text-white/80">{item.text}</p>
+          <p className="whitespace-pre-wrap break-words text-sm text-white/90 select-text cursor-text leading-relaxed">
+            {item.text}
+          </p>
         )}
 
         {/* 3. Card de Imagem */}
@@ -330,19 +413,42 @@ export function FlowCard({
           </button>
         )}
 
-        {/* 4. Card de Arquivo Binário (PDF, EXE, DOC, ZIP, etc. — Estilo FTP) */}
+        {/* 4. Card de Arquivo Binário ou Vídeo com Player */}
         {item.type === 'file' && (
           <div className="space-y-2.5">
+            {/* Preview de Vídeo com Player no App */}
+            {isVideo && (
+              <div className="overflow-hidden rounded-xl border border-white/10 bg-black/60 shadow-md">
+                {resolvedVideoUrl ? (
+                  <video
+                    src={resolvedVideoUrl}
+                    controls
+                    playsInline
+                    preload="metadata"
+                    className="max-h-80 w-full rounded-xl object-contain bg-black"
+                  />
+                ) : (
+                  <div className="flex h-32 flex-col items-center justify-center gap-2 p-4 text-center text-xs text-white/40">
+                    <Film size={24} className="text-[#ff6b81]" />
+                    <span>Player de vídeo pronto</span>
+                    <span className="text-[11px] text-white/30">
+                      Clique em Baixar abaixo para reproduzir no seu aparelho
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3.5 transition hover:bg-white/[0.04]">
-              <div className="flex items-center gap-3 min-w-0">
+              <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
                 <div
                   className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-lg"
                   style={{ backgroundColor: fileCategory?.color || '#a29bfe' }}
                 >
-                  {fileCategory?.extension || 'FILE'}
+                  {isVideo ? <Film size={18} /> : fileCategory?.extension || 'FILE'}
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-semibold text-white truncate">
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-white truncate max-w-full">
                     {item.fileName || 'Arquivo sem nome'}
                   </p>
                   <div className="flex items-center gap-2 text-xs text-white/40 mt-0.5">
@@ -406,7 +512,7 @@ export function FlowCard({
               </div>
             </div>
 
-            {/* Barra de Progresso no Download de Arquivos (v0.3.1) */}
+            {/* Barra de Progresso no Download de Arquivos */}
             {downloadProgress?.isDownloading && (
               <div className="rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 p-3 animate-in fade-in duration-200">
                 <div className="flex items-center justify-between text-xs mb-1.5">
@@ -430,8 +536,8 @@ export function FlowCard({
           </div>
         )}
 
-        {/* Painel de Logs de Diagnóstico (v0.3.0) */}
-        {showLogs && item.logs && item.logs.length > 0 && (
+        {/* Painel de Logs de Diagnóstico — Visível somente se Dev-Tools ativar */}
+        {devTools.enableMessageLogs && showLogs && item.logs && item.logs.length > 0 && (
           <div className="mt-3 rounded-xl border border-white/10 bg-[#09090d] p-3 font-mono text-[11px] space-y-2">
             <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
               <span className="flex items-center gap-1.5 text-white/60 font-semibold">
@@ -461,7 +567,7 @@ export function FlowCard({
 
       {imageOpen && item.type === 'image' && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-8 backdrop-blur-sm"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-4 sm:p-8 backdrop-blur-sm"
           onClick={() => setImageOpen(false)}
         >
           <div className="relative max-h-full max-w-full" onClick={(e) => e.stopPropagation()}>
@@ -510,14 +616,15 @@ function LogLevelBadge({ level }: { level: FlowLogEntry['level'] }) {
   }
 }
 
-function TypeBadge({ type }: { type: FlowItem['type'] }) {
+function TypeBadge({ type }: { type: FlowItem['type'] | 'video' }) {
   const config = {
     link: { icon: Link2, color: 'text-[#00e5ff] bg-[#00e5ff]/10' },
     text: { icon: MessageSquare, color: 'text-[#ff9f43] bg-[#ff9f43]/10' },
     image: { icon: ImageIcon, color: 'text-[#26de81] bg-[#26de81]/10' },
     file: { icon: FileText, color: 'text-[#a29bfe] bg-[#a29bfe]/10' },
+    video: { icon: Film, color: 'text-[#ff6b81] bg-[#ff6b81]/10' },
   };
-  const { icon: Icon, color } = config[type] || config.text;
+  const { icon: Icon, color } = (config as any)[type] || config.text;
   return (
     <span className={`flex h-6 w-6 items-center justify-center rounded-lg ${color}`}>
       <Icon size={13} />

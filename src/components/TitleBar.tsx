@@ -49,23 +49,21 @@ export function TitleBar({
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {isElectron ? (
           <div
-            className="flex items-center gap-1.5"
+            className="flex items-center gap-1.5 pointer-events-none select-none"
             style={{ WebkitAppRegion: isElectron ? 'no-drag' : undefined } as React.CSSProperties}
+            aria-hidden="true"
           >
-            <button
-              onClick={() => window.electronAPI?.close()}
-              className="h-3 w-3 rounded-full bg-[#ff5f57] transition hover:brightness-110"
-              title="Fechar"
+            <div
+              className="h-3 w-3 rounded-full bg-[#ff5f57] opacity-80"
+              title="Enfeite"
             />
-            <button
-              onClick={() => window.electronAPI?.minimize()}
-              className="h-3 w-3 rounded-full bg-[#febc2e] transition hover:brightness-110"
-              title="Minimizar"
+            <div
+              className="h-3 w-3 rounded-full bg-[#febc2e] opacity-80"
+              title="Enfeite"
             />
-            <button
-              onClick={() => window.electronAPI?.maximize()}
-              className="h-3 w-3 rounded-full bg-[#28c840] transition hover:brightness-110"
-              title={isMaximized ? 'Restaurar' : 'Maximizar'}
+            <div
+              className="h-3 w-3 rounded-full bg-[#28c840] opacity-80"
+              title="Enfeite"
             />
           </div>
         ) : (
@@ -96,63 +94,59 @@ export function TitleBar({
           />
         </div>
 
-        {isWebSocketActive ? (
-          <div
-            className="flex items-center gap-1.5 rounded-full border border-[#26de81]/30 bg-[#26de81]/15 px-1 py-1 text-[#26de81]"
-            title={
-              isElectron
+        {/* Botão Unificado: Status de Conexão + QR Code (abre o modal de pareamento) */}
+        <button
+          onClick={onOpenSync}
+          className={`flex items-center gap-1.5 rounded-full border px-2 sm:px-2.5 py-1 text-xs font-medium transition ${
+            syncConnected
+              ? 'border-[#26de81]/30 bg-[#26de81]/15 text-[#26de81] hover:bg-[#26de81]/25'
+              : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
+          }`}
+          title={
+            isWebSocketActive
+              ? isElectron
                 ? activeClientsCount && activeClientsCount > 0
-                  ? `Conectado em tempo real com o celular (${activeClientsCount} aparelho${activeClientsCount > 1 ? 's' : ''})`
-                  : 'Servidor ativo na rede local'
-                : 'Conectado em tempo real via WebSocket push com o PC'
-            }
-          >
-            <span className="relative flex h-2 w-2">
+                  ? `Conectado em tempo real (${activeClientsCount} aparelho${activeClientsCount > 1 ? 's' : ''}). Clique para ver QR Code`
+                  : 'Servidor ativo na rede local. Clique para ver QR Code'
+                : 'Conectado em tempo real com o PC. Clique para ver detalhes'
+              : 'Modo offline. Clique para conectar via QR Code'
+          }
+        >
+          {isWebSocketActive ? (
+            <span className="relative flex h-2 w-2 shrink-0">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#26de81] opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-[#26de81]"></span>
             </span>
-          </div>
-        ) : (
-          <div
-            className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#661e1e65]/20 bg-[#661e1e65]/10 px-1 py-1"
-            title="Modo offline — dados salvos neste dispositivo"
-          >
-            <WifiOff size={12} className="text-[#d40000]" />
-          </div>
-        )}
-
-        <button
-          onClick={onOpenSync}
-          className={`flex items-center gap-1 rounded-full border px-2 sm:px-2.5 py-1 text-xs font-medium transition ${
-            syncConnected
-              ? 'border-[#26de81]/30 bg-[#26de81]/15 text-[#26de81] hover:bg-[#26de81]/25'
-              : 'border-[#00e5ff]/30 bg-[#00e5ff]/10 text-[#00e5ff] hover:bg-[#00e5ff]/20'
-          }`}
-          title="Sincronização bidirecional PC ↔ Celular via QR Code"
-        >
-          <QrCode size={12} />
+          ) : (
+            <WifiOff size={12} className="text-[#ff5f57] shrink-0" />
+          )}
+          <QrCode size={12} className="shrink-0" />
           <span className="hidden xs:inline">
             {isElectron
               ? activeClientsCount && activeClientsCount > 0
                 ? `Celular (${activeClientsCount})`
                 : 'Celular'
-              : 'Sync'}
+              : syncConnected
+              ? 'Sync'
+              : 'Conectar'}
           </span>
         </button>
 
         <button
           onClick={onOpenSettings}
           className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 sm:px-2.5 py-1 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
-          title="Configurações e opções de garimpo de dados"
+          title="Configurações e opções do aplicativo"
         >
           <Settings size={12} />
           <span className="hidden sm:inline">Config</span>
         </button>
 
+        {/* Botão Limpar visível para todos os usuários (incluindo mobile) */}
         {channel && (
           <button
             onClick={onClearChannel}
-            className="hidden sm:block rounded-lg px-2 py-1 text-xs text-white/40 transition hover:bg-red-500/10 hover:text-red-400"
+            className="rounded-lg px-2 py-1 text-xs text-white/40 transition hover:bg-red-500/10 hover:text-red-400"
+            title="Limpar mensagens não fixadas deste canal"
           >
             Limpar
           </button>

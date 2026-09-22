@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { Sparkles } from 'lucide-react';
+import { Sparkles, AlertCircle } from 'lucide-react';
 import { useFlowStore } from '@/hooks/useFlowStore';
 import { useNetworkTest } from '@/hooks/useNetworkTest';
 import { Sidebar } from '@/components/Sidebar';
@@ -8,6 +8,7 @@ import { FlowCard } from '@/components/FlowCard';
 import { Composer } from '@/components/Composer';
 import { SyncModal } from '@/components/SyncModal';
 import { SettingsModal } from '@/components/SettingsModal';
+import { fetchLinkPreview, getDomain } from '@/lib/linkPreview';
 import {
   reconcileSyncData,
   loadSyncConfig,
@@ -43,6 +44,17 @@ export function App() {
   const [isWsConnected, setIsWsConnected] = useState(false);
   const [activeWsClientsCount, setActiveWsClientsCount] = useState(0);
   const [syncConfigVersion, setSyncConfigVersion] = useState(0);
+  const [offlineToast, setOfflineToast] = useState<string | null>(null);
+  const toastTimeoutRef = useRef<any>(null);
+
+  function triggerOfflineToast(msg = 'Conecte o dispositivo de origem') {
+    if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
+    setOfflineToast(msg);
+    toastTimeoutRef.current = setTimeout(() => {
+      setOfflineToast(null);
+      toastTimeoutRef.current = null;
+    }, 2500);
+  }
   const [syncActivity, setSyncActivity] = useState<{
     lastSyncTime?: number;
     lastDevice?: string;
@@ -274,6 +286,28 @@ export function App() {
     const cleanupDirect = window.electronAPI.onDirectEvent?.((event) => {
       if (event.eventType === 'new_flow_item' && event.data) {
         storeRef.current.addFlowDirect(event.data);
+        if (event.data.type === 'link' && event.data.url && event.data.isLoadingPreview) {
+          setTimeout(() => {
+            const currentItem = storeRef.current.flows.find((f) => f.id === event.data.id);
+            if (currentItem && currentItem.isLoadingPreview) {
+              fetchLinkPreview(event.data.url)
+                .then((preview) => {
+                  storeRef.current.updateFlowPreview(event.data.id, {
+                    title: preview.title || getDomain(event.data.url),
+                    description: preview.description || '',
+                    image: preview.image || `https://www.google.com/s2/favicons?domain=${getDomain(event.data.url)}&sz=128`,
+                    siteName: preview.siteName || getDomain(event.data.url),
+                    isLoadingPreview: false,
+                  });
+                })
+                .catch(() => {
+                  storeRef.current.updateFlowPreview(event.data.id, { isLoadingPreview: false });
+                });
+            }
+          }, 3500);
+        }
+      } else if (event.eventType === 'update_flow_item' && event.data?.id) {
+        storeRef.current.updateFlowPreview(event.data.id, event.data.preview);
       } else if (event.eventType === 'delete_flow_item' && event.data?.id) {
         storeRef.current.deleteFlow(event.data.id);
       }
@@ -398,6 +432,28 @@ export function App() {
       (event) => {
         if (event.eventType === 'new_flow_item' && event.data) {
           storeRef.current.addFlowDirect(event.data);
+          if (event.data.type === 'link' && event.data.url && event.data.isLoadingPreview) {
+            setTimeout(() => {
+              const currentItem = storeRef.current.flows.find((f) => f.id === event.data.id);
+              if (currentItem && currentItem.isLoadingPreview) {
+                fetchLinkPreview(event.data.url)
+                  .then((preview) => {
+                    storeRef.current.updateFlowPreview(event.data.id, {
+                      title: preview.title || getDomain(event.data.url),
+                      description: preview.description || '',
+                      image: preview.image || `https://www.google.com/s2/favicons?domain=${getDomain(event.data.url)}&sz=128`,
+                      siteName: preview.siteName || getDomain(event.data.url),
+                      isLoadingPreview: false,
+                    });
+                  })
+                  .catch(() => {
+                    storeRef.current.updateFlowPreview(event.data.id, { isLoadingPreview: false });
+                  });
+              }
+            }, 3500);
+          }
+        } else if (event.eventType === 'update_flow_item' && event.data?.id) {
+          storeRef.current.updateFlowPreview(event.data.id, event.data.preview);
         } else if (event.eventType === 'delete_flow_item' && event.data?.id) {
           storeRef.current.deleteFlow(event.data.id);
         }
@@ -446,10 +502,7 @@ export function App() {
           f.imageName?.toLowerCase().includes(q)
       );
     }
-    return [...items].sort((a, b) => {
-      if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
-      return b.createdAt - a.createdAt;
-    });
+    return [...items].sort((a, b) => b.createdAt - a.createdAt);
   }, [activeChannel, store.flows, filter, search]);
 
   function handleCreateChannel() {
@@ -577,7 +630,12 @@ export function App() {
       const syncConfig = loadSyncConfig();
 
       // Se estiver no celular conectado ao servidor PC:
-      if (!isElectron && syncConfig?.serverUrl && syncConfig?.token) {
+      if (!isElectron) {
+        if (!isWsConnected || !syncConfig?.serverUrl || !syncConfig?.token) {
+          triggerOfflineToast('Conecte o dispositivo de origem');
+          return;
+        }
+
         setDownloadProgressMap((prev) => ({
           ...prev,
           [item.id]: { percent: 5, isDownloading: true },
@@ -616,6 +674,7 @@ export function App() {
             [item.id]: { percent: 100, isDownloading: false, isSuccess: true },
           }));
         } catch (err: any) {
+          triggerOfflineToast('Conecte o dispositivo de origem');
           store.addFlowLog(item.id, {
             timestamp: Date.now(),
             level: 'error',
@@ -631,6 +690,11 @@ export function App() {
 
       // Se estiver no PC e o arquivo estiver no celular conectado:
       if (isElectron && window.electronAPI?.requestFileDownloadFromMobile) {
+        if (!item.filePath && activeWsClientsCount === 0) {
+          triggerOfflineToast('Conecte o dispositivo de origem');
+          return;
+        }
+
         setDownloadProgressMap((prev) => ({
           ...prev,
           [item.id]: { percent: 5, isDownloading: true },
@@ -649,6 +713,12 @@ export function App() {
         });
       }
     }
+  }
+
+  function handleUpdateFlowPreview(id: string, preview: Partial<FlowItem>) {
+    store.updateFlowPreview(id, preview);
+    broadcastDirectEvent('update_flow_item', { id, preview });
+    broadcastDataChange();
   }
 
   // Envio de Link
@@ -741,7 +811,14 @@ export function App() {
     : isWsConnected || Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 60000);
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#0a0a0f] text-white">
+    <div className="relative flex h-screen w-screen max-w-[100vw] flex-col overflow-hidden bg-[#0a0a0f] text-white">
+      {offlineToast && (
+        <div className="fixed top-12 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2 rounded-xl border border-amber-500/40 bg-[#161622]/95 px-4 py-2.5 text-sm font-medium text-amber-200 shadow-xl shadow-black/50 backdrop-blur-md transition-all animate-bounce">
+          <AlertCircle size={18} className="text-amber-400 shrink-0" />
+          <span>{offlineToast}</span>
+        </div>
+      )}
+
       <TitleBar
         channel={activeChannel}
         onClearChannel={() => activeChannel && store.clearChannel(activeChannel.id)}
@@ -785,7 +862,7 @@ export function App() {
         activeClientsCount={isElectron ? activeWsClientsCount : undefined}
       />
 
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 overflow-hidden w-full max-w-[100vw] min-w-0">
         <Sidebar
           channels={store.channels}
           activeChannelId={store.activeChannelId}
@@ -800,7 +877,7 @@ export function App() {
           onCloseMobile={() => setIsSidebarOpenMobile(false)}
         />
 
-        <main className="flex flex-1 flex-col">
+        <main className="flex flex-1 flex-col min-w-0 max-w-full overflow-x-hidden">
           {creatingChannel && (
             <div className="border-b border-white/5 bg-[#0d0d12] px-4 py-3">
               <input
@@ -823,13 +900,13 @@ export function App() {
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 ">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-6 w-full max-w-full min-w-0">
             {!activeChannel && <EmptyState onCreate={handleCreateChannel} />}
             {activeChannel && visibleFlows.length === 0 && (
               <ChannelEmpty channelName={activeChannel.name} />
             )}
             {activeChannel && visibleFlows.length > 0 && (
-              <div className="mx-auto max-w-2xl space-y-3">
+              <div className="mx-auto w-full max-w-2xl space-y-3 min-w-0">
                 {visibleFlows.map((item) => (
                   <FlowCard
                     key={item.id}
@@ -849,7 +926,7 @@ export function App() {
             <Composer
               channelId={activeChannel.id}
               onSendLink={handleSendLink}
-              onUpdateFlowPreview={store.updateFlowPreview}
+              onUpdateFlowPreview={handleUpdateFlowPreview}
               onSendText={handleSendText}
               onSendImage={handleSendImage}
               onSendFile={handleSendFile}

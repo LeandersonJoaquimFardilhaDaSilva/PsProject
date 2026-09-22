@@ -128,6 +128,10 @@ export function useFlowStore() {
   }, []);
 
   const deleteFlow = useCallback((id: string) => {
+    const target = memoryRef.current.flows.find((f) => f.id === id);
+    if (target?.pinned) {
+      return;
+    }
     addDeletedFlowId(id);
     memoryRef.current.flows = memoryRef.current.flows.filter((f) => f.id !== id);
     saveFlows(memoryRef.current.flows);
@@ -146,7 +150,12 @@ export function useFlowStore() {
     const remaining: FlowItem[] = [];
     for (const f of memoryRef.current.flows) {
       if (f.channelId === channelId) {
-        addDeletedFlowId(f.id);
+        if (f.pinned) {
+          // Mensagens fixadas são preservadas mesmo ao limpar canal
+          remaining.push(f);
+        } else {
+          addDeletedFlowId(f.id);
+        }
       } else {
         remaining.push(f);
       }

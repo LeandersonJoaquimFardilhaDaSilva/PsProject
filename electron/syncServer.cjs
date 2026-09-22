@@ -30,6 +30,30 @@ function sanitizeName(name) {
   return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'geral';
 }
 
+function getMimeType(filePath) {
+  const ext = path.extname(filePath).toLowerCase();
+  const map = {
+    '.mp4': 'video/mp4',
+    '.webm': 'video/webm',
+    '.ogg': 'video/ogg',
+    '.ogv': 'video/ogg',
+    '.mov': 'video/quicktime',
+    '.mkv': 'video/x-matroska',
+    '.mp3': 'audio/mpeg',
+    '.wav': 'audio/wav',
+    '.png': 'image/png',
+    '.jpg': 'image/jpeg',
+    '.jpeg': 'image/jpeg',
+    '.gif': 'image/gif',
+    '.webp': 'image/webp',
+    '.svg': 'image/svg+xml',
+    '.pdf': 'application/pdf',
+    '.txt': 'text/plain; charset=utf-8',
+    '.json': 'application/json',
+  };
+  return map[ext] || 'application/octet-stream';
+}
+
 function startSyncServer(options = {}) {
   let port = options.port || 54321;
   const documentsPath = options.documentsPath || path.join(os.homedir(), 'Documents');
@@ -102,11 +126,11 @@ function startSyncServer(options = {}) {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Sync-Token, X-Channel-Name, X-File-Name, X-File-Id, X-File-Type'
+      'Content-Type, Authorization, X-Sync-Token, X-Channel-Name, X-File-Name, X-File-Id, X-File-Type, Range'
     );
     res.setHeader(
       'Access-Control-Expose-Headers',
-      'Content-Length, Content-Disposition, X-File-Size, X-File-Name'
+      'Content-Length, Content-Disposition, X-File-Size, X-File-Name, Content-Range, Accept-Ranges'
     );
 
     if (req.method === 'OPTIONS') {
@@ -276,11 +300,38 @@ function startSyncServer(options = {}) {
 
       const stat = fs.statSync(targetFilePath);
       const downloadName = rawFileName || path.basename(targetFilePath);
+      const mimeType = getMimeType(downloadName);
+      const range = req.headers.range;
+
+      if (range) {
+        const parts = range.replace(/bytes=/, '').split('-');
+        const start = parseInt(parts[0], 10);
+        const end = parts[1] ? parseInt(parts[1], 10) : stat.size - 1;
+        const chunksize = end - start + 1;
+
+        res.writeHead(206, {
+          'Content-Range': `bytes ${start}-${end}/${stat.size}`,
+          'Accept-Ranges': 'bytes',
+          'Content-Length': chunksize,
+          'Content-Type': mimeType,
+          'Content-Disposition': `inline; filename="${encodeURIComponent(downloadName)}"`,
+          'X-File-Size': stat.size.toString(),
+          'X-File-Name': encodeURIComponent(downloadName),
+        });
+
+        fs.createReadStream(targetFilePath, { start, end }).pipe(res);
+        return;
+      }
+
+      const isInline = url.searchParams.get('stream') === '1' || mimeType.startsWith('video/') || mimeType.startsWith('image/');
 
       res.writeHead(200, {
-        'Content-Type': 'application/octet-stream',
+        'Content-Type': mimeType,
         'Content-Length': stat.size,
-        'Content-Disposition': `attachment; filename="${encodeURIComponent(downloadName)}"`,
+        'Accept-Ranges': 'bytes',
+        'Content-Disposition': isInline
+          ? `inline; filename="${encodeURIComponent(downloadName)}"`
+          : `attachment; filename="${encodeURIComponent(downloadName)}"`,
         'X-File-Size': stat.size.toString(),
         'X-File-Name': encodeURIComponent(downloadName),
       });
