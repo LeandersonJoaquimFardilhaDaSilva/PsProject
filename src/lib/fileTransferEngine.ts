@@ -397,7 +397,16 @@ export async function uploadFileToPcStream(
   )}&fileId=${encodeURIComponent(id)}`;
 
   return new Promise((resolve, reject) => {
-    const xhr = new XMLHttpRequest();
+    // Garante o uso do XMLHttpRequest nativo não-interceptado do WebView/Chromium
+    const NativeXhr =
+      (window as any).CapacitorWebXMLHttpRequest?.fullObject ||
+      (window as any).CapacitorWebXMLHttpRequest?.constructor ||
+      window.XMLHttpRequest;
+    const xhr = new NativeXhr();
+    const nativeSend =
+      (window as any).CapacitorWebXMLHttpRequest?.send ||
+      xhr.send;
+
     xhr.open('POST', uploadUrl, true);
     xhr.setRequestHeader('Content-Type', 'application/octet-stream');
     xhr.setRequestHeader('X-Sync-Token', token);
@@ -407,7 +416,7 @@ export async function uploadFileToPcStream(
 
     let lastProgressTime = 0;
     if (xhr.upload && onProgress) {
-      xhr.upload.onprogress = (evt) => {
+      xhr.upload.onprogress = (evt: ProgressEvent) => {
         if (evt.lengthComputable) {
           const now = performance.now();
           const isComplete = evt.loaded >= evt.total;
@@ -453,6 +462,6 @@ export async function uploadFileToPcStream(
     xhr.onerror = () => reject(new Error('Falha de rede durante o upload'));
     xhr.ontimeout = () => reject(new Error('Tempo limite de upload esgotado'));
 
-    xhr.send(file);
+    nativeSend.call(xhr, file);
   });
 }

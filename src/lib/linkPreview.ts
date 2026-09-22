@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
 export interface LinkPreview {
   title?: string;
@@ -173,17 +173,18 @@ export async function tryNativeSocialCrawler(url: string, timeoutMs = 8000): Pro
   } else if (isNativeMobile) {
     // Mobile Android (via CapacitorHttp nativo do Android com cabeçalho de crawler social)
     const res = await withTimeout(
-      fetch(normalized, {
+      CapacitorHttp.get({
+        url: normalized,
         headers: {
           'User-Agent':
             'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.html); Twitterbot/1.0; Mozilla/5.0 (Linux; Android 14) Flow/1.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
+        responseType: 'text',
       }),
       timeoutMs
     );
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    html = await res.text();
+    html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
   } else {
     // Web padrão
     const res = await withTimeout(fetch(normalized), timeoutMs);

@@ -368,6 +368,12 @@ export function App() {
                 ...prev,
                 [req.fileId]: { percent: 100, isDownloading: false, isSuccess: true },
               }));
+            }).catch((err) => {
+              console.error('[WebSocketSync] Erro no upload sob demanda para o PC:', err);
+              setDownloadProgressMap((prev) => ({
+                ...prev,
+                [req.fileId]: { percent: 0, isDownloading: false, isSuccess: false },
+              }));
             });
           } catch (err) {
             console.error('[WebSocketSync] Erro no upload sob demanda para o PC:', err);
