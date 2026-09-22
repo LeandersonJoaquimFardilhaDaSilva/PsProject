@@ -3,6 +3,7 @@ export interface SyncServerInfo {
   port: number;
   token: string;
   ips: string[];
+  clientCount?: number;
   qrData: {
     protocol: string;
     version: number;
@@ -35,6 +36,7 @@ export interface SyncClientInfo {
 
 export interface ElectronAPI {
   isElectron: boolean;
+  getPathForFile?: (file: File) => string;
   minimize: () => void;
   maximize: () => void;
   close: () => void;
@@ -47,6 +49,8 @@ export interface ElectronAPI {
   onSyncIncoming: (callback: (data: SyncIncomingData) => void) => () => void;
   sendSyncResponse: (syncId: string, data: SyncMergedResult) => Promise<any>;
   onSyncClientConnected: (callback: (data: SyncClientInfo) => void) => () => void;
+  onWsClientsCountChange: (callback: (count: number) => void) => () => void;
+  onSyncClientHeartbeat: (callback: (data: SyncClientInfo) => void) => () => void;
   // Métodos de Arquivos e Streaming (v0.3.0)
   getDocumentsFolder: () => Promise<string>;
   saveFileToDocuments: (data: { channelName: string; fileName: string; bufferData: Uint8Array | number[] }) => Promise<{

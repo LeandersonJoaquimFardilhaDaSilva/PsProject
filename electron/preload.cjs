@@ -1,7 +1,18 @@
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   isElectron: true,
+  getPathForFile: (file) => {
+    try {
+      if (webUtils && typeof webUtils.getPathForFile === 'function') {
+        return webUtils.getPathForFile(file);
+      }
+      return file?.path || '';
+    } catch (err) {
+      console.error('[Preload] Erro ao obter caminho do arquivo via webUtils:', err);
+      return file?.path || '';
+    }
+  },
   minimize: () => ipcRenderer.send('window-minimize'),
   maximize: () => ipcRenderer.send('window-maximize'),
   close: () => ipcRenderer.send('window-close'),
@@ -31,6 +42,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('sync-client-connected', subscription);
     return () => {
       ipcRenderer.removeListener('sync-client-connected', subscription);
+    };
+  },
+  onWsClientsCountChange: (callback) => {
+    const subscription = (_event, count) => callback(count);
+    ipcRenderer.on('ws-clients-count-change', subscription);
+    return () => {
+      ipcRenderer.removeListener('ws-clients-count-change', subscription);
+    };
+  },
+  onSyncClientHeartbeat: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('sync-client-heartbeat', subscription);
+    return () => {
+      ipcRenderer.removeListener('sync-client-heartbeat', subscription);
     };
   },
   // Gerenciamento de Arquivos Locais e Streaming (v0.3.0)

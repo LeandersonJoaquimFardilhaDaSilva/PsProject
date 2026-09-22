@@ -60,11 +60,35 @@ function startSyncServer(options = {}) {
   }
 
   const fileRegistry = new Map();
+  const fileRegistryPath = path.join(documentsPath, 'PsProject', 'file_registry.json');
+  try {
+    if (fs.existsSync(fileRegistryPath)) {
+      const parsed = JSON.parse(fs.readFileSync(fileRegistryPath, 'utf8'));
+      for (const [k, v] of Object.entries(parsed)) {
+        if (v && typeof v === 'object' && v.originalPath && fs.existsSync(v.originalPath)) {
+          fileRegistry.set(k, v);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[SyncServer] Aviso ao carregar file_registry.json:', err);
+  }
+
+  function persistFileRegistry() {
+    try {
+      const obj = Object.fromEntries(fileRegistry);
+      fs.writeFileSync(fileRegistryPath, JSON.stringify(obj, null, 2), 'utf8');
+    } catch (err) {
+      console.warn('[SyncServer] Erro ao salvar file_registry.json:', err);
+    }
+  }
 
   const onSyncRequest =
     options.onSyncRequest ||
     (async () => ({ channels: [], flows: [], deletedChannelIds: [], deletedFlowIds: [] }));
   const onClientConnected = options.onClientConnected || (() => {});
+  const onWsClientCountChange = options.onWsClientCountChange || (() => {});
+  const onClientActivity = options.onClientActivity || (() => {});
   const onFileReceived = options.onFileReceived || (() => {});
   const onFileProgress = options.onFileProgress || (() => {});
   const onNetTestPing = options.onNetTestPing || (() => {});
@@ -174,6 +198,7 @@ function startSyncServer(options = {}) {
 
         // Registra o arquivo salvo
         fileRegistry.set(fileId, { originalPath: targetFilePath, fileName: safeFileName, fileSize: bytesWritten });
+        persistFileRegistry();
 
         onFileReceived(result);
 
@@ -200,7 +225,13 @@ function startSyncServer(options = {}) {
     // Envia o arquivo diretamente de sua localização original (Downloads, DCIM, Documents, etc.)
     if (url.pathname === '/api/files/download' && req.method === 'GET') {
       const fileId = url.searchParams.get('fileId');
-      const directPath = url.searchParams.get('filePath');
+      const rawDirectPath = url.searchParams.get('filePath') || '';
+      let directPath = '';
+      try {
+        directPath = decodeURIComponent(rawDirectPath).trim();
+      } catch {
+        directPath = rawDirectPath.trim();
+      }
       const channelName = decodeURIComponent(url.searchParams.get('channelName') || 'Geral');
       const rawFileName = decodeURIComponent(url.searchParams.get('fileName') || '');
 
@@ -224,6 +255,16 @@ function startSyncServer(options = {}) {
         const fallbackPath = path.join(baseFilesPath, sanitizeName(channelName), sanitizeName(rawFileName));
         if (fs.existsSync(fallbackPath)) {
           targetFilePath = fallbackPath;
+        }
+      }
+
+      // 4. Fallback: busca por correspondência de nome no fileRegistry
+      if (!targetFilePath && rawFileName) {
+        for (const reg of fileRegistry.values()) {
+          if (reg.fileName === rawFileName && reg.originalPath && fs.existsSync(reg.originalPath)) {
+            targetFilePath = reg.originalPath;
+            break;
+          }
         }
       }
 
@@ -337,6 +378,12 @@ function startSyncServer(options = {}) {
     connectedWsClients.add(ws);
     const clientIp = req.socket.remoteAddress;
     console.log(`[SyncServer WS] Cliente conectado: ${clientIp} (Total: ${connectedWsClients.size})`);
+    onWsClientCountChange(connectedWsClients.size);
+    onClientConnected({
+      ip: clientIp,
+      timestamp: Date.now(),
+      device: 'Celular (WebSocket)',
+    });
 
     // Envia mensagem de boas-vindas e confirmação de conexão
     ws.send(
@@ -346,6 +393,14 @@ function startSyncServer(options = {}) {
         device: 'Flow Desktop Server',
       })
     );
+
+    const handleDisconnect = () => {
+      if (connectedWsClients.has(ws)) {
+        connectedWsClients.delete(ws);
+        console.log(`[SyncServer WS] Cliente desconectado: ${clientIp}. Ativos: ${connectedWsClients.size}`);
+        onWsClientCountChange(connectedWsClients.size);
+      }
+    };
 
     ws.on('message', async (message) => {
       try {
@@ -366,12 +421,33 @@ function startSyncServer(options = {}) {
             },
             ws
           );
+          onClientActivity({
+            ip: clientIp,
+            timestamp: Date.now(),
+            device: 'Celular (WebSocket)',
+          });
         } else if (data.type === 'ping') {
           ws.send(JSON.stringify({ type: 'pong', timestamp: Date.now() }));
+          onClientActivity({
+            ip: clientIp,
+            timestamp: Date.now(),
+            device: 'Celular (WebSocket)',
+          });
+        } else if (data.type === 'pong') {
+          onClientActivity({
+            ip: clientIp,
+            timestamp: Date.now(),
+            device: 'Celular (WebSocket)',
+          });
         } else if (data.type === 'direct_event') {
           // Evento granular em tempo real (< 10ms)
           onDirectEvent(data);
           broadcastWs(data, ws);
+          onClientActivity({
+            ip: clientIp,
+            timestamp: Date.now(),
+            device: 'Celular (WebSocket)',
+          });
         } else if (data.type === 'net_ping') {
           // Sinal de Ping do Teste de Rede
           onNetTestPing(data);
@@ -393,14 +469,11 @@ function startSyncServer(options = {}) {
       }
     });
 
-    ws.on('close', () => {
-      connectedWsClients.delete(ws);
-      console.log(`[SyncServer WS] Cliente desconectado. Ativos: ${connectedWsClients.size}`);
-    });
+    ws.on('close', handleDisconnect);
 
     ws.on('error', (err) => {
       console.warn('[SyncServer WS] Erro no socket cliente:', err.message);
-      connectedWsClients.delete(ws);
+      handleDisconnect();
     });
   });
 
@@ -412,7 +485,11 @@ function startSyncServer(options = {}) {
           client.send(JSON.stringify({ type: 'server_ping', timestamp: Date.now() }));
         } catch {
           connectedWsClients.delete(client);
+          onWsClientCountChange(connectedWsClients.size);
         }
+      } else {
+        connectedWsClients.delete(client);
+        onWsClientCountChange(connectedWsClients.size);
       }
     }
   }, 15000);
@@ -445,8 +522,10 @@ function startSyncServer(options = {}) {
         broadcast: broadcastWs,
         registerOriginalFile: (fileId, originalPath, fileName, fileSize) => {
           fileRegistry.set(fileId, { originalPath, fileName, fileSize });
+          persistFileRegistry();
           return true;
         },
+        getClientCount: () => connectedWsClients.size,
         getFileRegistry: () => fileRegistry,
         getQrData: () => ({
           protocol: 'flow-sync',

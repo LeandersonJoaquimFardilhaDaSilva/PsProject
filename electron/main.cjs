@@ -136,6 +136,7 @@ ipcMain.handle('get-sync-info', () => {
       token: '',
       ips,
       qrData: null,
+      clientCount: 0,
     };
   }
   return {
@@ -144,6 +145,7 @@ ipcMain.handle('get-sync-info', () => {
     token: syncServerInstance.token,
     ips: syncServerInstance.ips,
     qrData: syncServerInstance.getQrData(),
+    clientCount: syncServerInstance.getClientCount ? syncServerInstance.getClientCount() : 0,
   };
 });
 
@@ -323,6 +325,16 @@ app.whenReady().then(async () => {
       onClientConnected: (clientInfo) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('sync-client-connected', clientInfo);
+        }
+      },
+      onWsClientCountChange: (count) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('ws-clients-count-change', count);
+        }
+      },
+      onClientActivity: (activityInfo) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('sync-client-heartbeat', activityInfo);
         }
       },
     });

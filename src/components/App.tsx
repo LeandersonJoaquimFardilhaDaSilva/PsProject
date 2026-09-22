@@ -41,6 +41,8 @@ export function App() {
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
   const [isWsConnected, setIsWsConnected] = useState(false);
+  const [activeWsClientsCount, setActiveWsClientsCount] = useState(0);
+  const [syncConfigVersion, setSyncConfigVersion] = useState(0);
   const [syncActivity, setSyncActivity] = useState<{
     lastSyncTime?: number;
     lastDevice?: string;
@@ -114,36 +116,77 @@ export function App() {
     if (!window.electronAPI?.onSyncIncoming) return;
 
     const cleanup = window.electronAPI.onSyncIncoming(async (incomingData) => {
-      const currentLocal = storeRef.current.getSyncPayload();
-      const merged = reconcileSyncData(currentLocal, {
-        channels: incomingData.channels,
-        flows: incomingData.flows,
-        deletedChannelIds: incomingData.deletedChannelIds,
-        deletedFlowIds: incomingData.deletedFlowIds,
-      });
+      try {
+        const currentLocal = storeRef.current.getSyncPayload();
+        const safeIncoming = {
+          channels: Array.isArray(incomingData?.channels) ? incomingData.channels : [],
+          flows: Array.isArray(incomingData?.flows) ? incomingData.flows : [],
+          deletedChannelIds: Array.isArray(incomingData?.deletedChannelIds) ? incomingData.deletedChannelIds : [],
+          deletedFlowIds: Array.isArray(incomingData?.deletedFlowIds) ? incomingData.deletedFlowIds : [],
+        };
+        const merged = reconcileSyncData(currentLocal, safeIncoming);
 
-      storeRef.current.replaceStoreData(
-        merged.channels,
-        merged.flows,
-        merged.deletedChannelIds,
-        merged.deletedFlowIds
-      );
+        storeRef.current.replaceStoreData(
+          merged.channels,
+          merged.flows,
+          merged.deletedChannelIds,
+          merged.deletedFlowIds
+        );
 
-      await window.electronAPI!.sendSyncResponse(incomingData.syncId, {
-        channels: merged.channels,
-        flows: merged.flows,
-        deletedChannelIds: merged.deletedChannelIds,
-        deletedFlowIds: merged.deletedFlowIds,
-      });
+        await window.electronAPI!.sendSyncResponse(incomingData.syncId, {
+          channels: merged.channels,
+          flows: merged.flows,
+          deletedChannelIds: merged.deletedChannelIds,
+          deletedFlowIds: merged.deletedFlowIds,
+        });
 
-      setSyncActivity({
-        lastSyncTime: Date.now(),
-        lastDevice: 'Celular',
-        itemsCount: merged.flows.length,
-      });
+        setSyncActivity({
+          lastSyncTime: Date.now(),
+          lastDevice: 'Celular',
+          itemsCount: merged.flows.length,
+        });
+      } catch (err) {
+        console.error('[App] Erro na reconciliação sync-incoming:', err);
+        try {
+          const fallbackLocal = storeRef.current.getSyncPayload();
+          await window.electronAPI!.sendSyncResponse(incomingData.syncId, {
+            channels: fallbackLocal.channels,
+            flows: fallbackLocal.flows,
+            deletedChannelIds: fallbackLocal.deletedChannelIds,
+            deletedFlowIds: fallbackLocal.deletedFlowIds,
+          });
+        } catch {
+          // ignore
+        }
+      }
     });
 
     const cleanupClient = window.electronAPI.onSyncClientConnected?.((client) => {
+      setSyncActivity((prev) => ({
+        ...prev,
+        lastSyncTime: client.timestamp,
+        lastDevice: client.device,
+      }));
+    });
+
+    window.electronAPI.getSyncInfo?.().then((info) => {
+      if (info?.clientCount !== undefined) {
+        setActiveWsClientsCount(info.clientCount);
+      }
+    });
+
+    const cleanupWsCount = window.electronAPI.onWsClientsCountChange?.((count) => {
+      setActiveWsClientsCount(count);
+      if (count > 0) {
+        setSyncActivity((prev) => ({
+          ...prev,
+          lastSyncTime: Date.now(),
+          lastDevice: 'Celular (WebSocket)',
+        }));
+      }
+    });
+
+    const cleanupHeartbeat = window.electronAPI.onSyncClientHeartbeat?.((client) => {
       setSyncActivity((prev) => ({
         ...prev,
         lastSyncTime: client.timestamp,
@@ -239,6 +282,8 @@ export function App() {
     return () => {
       cleanup();
       cleanupClient?.();
+      cleanupWsCount?.();
+      cleanupHeartbeat?.();
       cleanupProgress?.();
       cleanupFile?.();
       cleanupPing?.();
@@ -247,31 +292,53 @@ export function App() {
     };
   }, []);
 
+  // Escuta atualizações de configuração de sincronização para reconectar imediatamente
+  useEffect(() => {
+    const handleConfigUpdated = () => {
+      setSyncConfigVersion((v) => v + 1);
+    };
+    window.addEventListener('flow-sync-config-updated', handleConfigUpdated);
+    return () => window.removeEventListener('flow-sync-config-updated', handleConfigUpdated);
+  }, []);
+
   // 2. Cliente Mobile / Web: Push em Tempo Real via WebSocket (Persistente e Estável)
   useEffect(() => {
     if (isElectron) return; // No PC, o Electron roda o servidor WebSocket
 
     const config = loadSyncConfig();
-    if (!config || !config.serverUrl || !config.token) return;
+    if (!config || !config.serverUrl || !config.token) {
+      setIsWsConnected(false);
+      return;
+    }
 
     const wsClient = new WebSocketSyncClient(
       config.serverUrl,
       config.token,
       (data) => {
-        if (data && (data.channels || data.flows)) {
-          const currentLocal = storeRef.current.getSyncPayload();
-          const merged = reconcileSyncData(currentLocal, data);
-          storeRef.current.replaceStoreData(
-            merged.channels,
-            merged.flows,
-            merged.deletedChannelIds,
-            merged.deletedFlowIds
-          );
-          setSyncActivity({
-            lastSyncTime: Date.now(),
-            lastDevice: 'PC (WebSocket)',
-            itemsCount: merged.flows.length,
-          });
+        if (data && (Array.isArray(data.channels) || Array.isArray(data.flows))) {
+          try {
+            const currentLocal = storeRef.current.getSyncPayload();
+            const safeData = {
+              channels: Array.isArray(data.channels) ? data.channels : [],
+              flows: Array.isArray(data.flows) ? data.flows : [],
+              deletedChannelIds: Array.isArray(data.deletedChannelIds) ? data.deletedChannelIds : [],
+              deletedFlowIds: Array.isArray(data.deletedFlowIds) ? data.deletedFlowIds : [],
+            };
+            const merged = reconcileSyncData(currentLocal, safeData);
+            storeRef.current.replaceStoreData(
+              merged.channels,
+              merged.flows,
+              merged.deletedChannelIds,
+              merged.deletedFlowIds
+            );
+            setSyncActivity({
+              lastSyncTime: Date.now(),
+              lastDevice: 'PC (WebSocket)',
+              itemsCount: merged.flows.length,
+            });
+          } catch (err) {
+            console.error('[App] Erro ao reconciliar push via WebSocket:', err);
+          }
         }
       },
       (status) => {
@@ -345,7 +412,7 @@ export function App() {
       wsClient.destroy();
       wsClientRef.current = null;
     };
-  }, [isElectron, isSyncModalOpen]);
+  }, [isElectron, syncConfigVersion]);
 
   const flowsCount = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -399,7 +466,17 @@ export function App() {
     if (!activeChannel) return;
     const channelName = activeChannel.name;
     const ext = file.name.split('.').pop()?.toLowerCase() || 'file';
-    const originalPath = (file as any).path || '';
+    let originalPath = '';
+    if (isElectron && window.electronAPI?.getPathForFile) {
+      try {
+        originalPath = window.electronAPI.getPathForFile(file) || '';
+      } catch (err) {
+        console.warn('[App] Erro ao obter caminho do arquivo via getPathForFile:', err);
+      }
+    }
+    if (!originalPath) {
+      originalPath = (file as any).path || '';
+    }
 
     const item = store.addFlow({
       type: 'file',
@@ -413,7 +490,7 @@ export function App() {
           timestamp: Date.now(),
           level: 'info',
           message: `Arquivo selecionado: ${file.name} (${formatBytes(file.size)})`,
-          details: originalPath ? `Origem no disco: ${originalPath}` : 'Pronto para download sob demanda',
+          details: originalPath ? `Origem no disco: ${originalPath}` : 'Pronto para download',
         },
       ],
     });
@@ -649,7 +726,13 @@ export function App() {
     broadcastDataChange();
   }
 
-  const isWsLive = isWsConnected || (isElectron && Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 60000));
+  const isWsLive = isElectron
+    ? activeWsClientsCount > 0 || Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 60000)
+    : isWsConnected;
+
+  const isSyncConnected = isElectron
+    ? activeWsClientsCount > 0 || Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 60000)
+    : isWsConnected || Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 60000);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#0a0a0f] text-white">
@@ -660,8 +743,9 @@ export function App() {
         onSearchChange={setSearch}
         onOpenSync={() => setIsSyncModalOpen(true)}
         onOpenSettings={() => setIsSettingsModalOpen(true)}
-        syncConnected={Boolean(syncActivity.lastSyncTime && Date.now() - syncActivity.lastSyncTime < 30000)}
+        syncConnected={isSyncConnected}
         isWebSocketActive={isWsLive}
+        activeClientsCount={isElectron ? activeWsClientsCount : undefined}
         onToggleSidebar={() => setIsSidebarOpenMobile((prev) => !prev)}
       />
 
@@ -692,6 +776,7 @@ export function App() {
         isWsConnected={isWsConnected}
         isElectron={isElectron}
         serverUrl={loadSyncConfig()?.serverUrl}
+        activeClientsCount={isElectron ? activeWsClientsCount : undefined}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -732,7 +817,7 @@ export function App() {
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6">
+          <div className="flex-1 overflow-y-auto px-4 sm:px-6 py-6 ">
             {!activeChannel && <EmptyState onCreate={handleCreateChannel} />}
             {activeChannel && visibleFlows.length === 0 && (
               <ChannelEmpty channelName={activeChannel.name} />

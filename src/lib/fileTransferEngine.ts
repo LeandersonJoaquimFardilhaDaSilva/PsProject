@@ -116,10 +116,9 @@ export async function saveLocalFile(
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.saveFileToDocuments);
   const isMobile = Capacitor.isNativePlatform();
 
-  const arrayBuffer = await fileBlob.arrayBuffer();
-
   if (isElectron && window.electronAPI?.saveFileToDocuments) {
     // Desktop: Salva via stream Node.js direto na pasta Documents
+    const arrayBuffer = await fileBlob.arrayBuffer();
     const result = await window.electronAPI.saveFileToDocuments({
       channelName: safeChannel,
       fileName: safeFile,
@@ -214,6 +213,75 @@ export async function downloadFileWithProgress(
   const downloadUrl = `${baseUrl}/api/files/download?${params.toString()}`;
 
   const start = performance.now();
+
+  if (Capacitor.isNativePlatform()) {
+    const safeChannel = sanitizeFileName(channelName || 'Geral');
+    const safeFile = sanitizeFileName(fileName);
+    const folderPath = `PsProject/channels/${safeChannel}`;
+
+    await Filesystem.mkdir({
+      directory: Directory.Documents,
+      path: folderPath,
+      recursive: true,
+    }).catch(() => {});
+
+    const targetPath = `${folderPath}/${safeFile}`;
+    let lastBytes = 0;
+    let lastProgressTime = 0;
+
+    let progressHandle: any = null;
+    if (onProgress) {
+      progressHandle = await Filesystem.addListener('progress', (status: any) => {
+        lastBytes = status.bytes || 0;
+        const total = status.contentLength || 0;
+        const now = performance.now();
+        const isComplete = total > 0 && lastBytes >= total;
+
+        if (isComplete || now - lastProgressTime >= 100) {
+          lastProgressTime = now;
+          const elapsedSec = Math.max(0.001, (now - start) / 1000);
+          const speedMBs = (lastBytes / (1024 * 1024) / elapsedSec).toFixed(2);
+          const percent = total > 0 ? Math.min(100, Math.round((lastBytes / total) * 100)) : 0;
+          onProgress({
+            percent,
+            speed: `${speedMBs} MB/s`,
+            loaded: lastBytes,
+            total: total || lastBytes,
+          });
+        }
+      });
+    }
+
+    try {
+      const downloadRes = await Filesystem.downloadFile({
+        url: downloadUrl,
+        path: targetPath,
+        directory: Directory.Documents,
+        headers: {
+          'X-Sync-Token': token,
+        },
+        progress: true,
+        recursive: true,
+      });
+
+      if (progressHandle) {
+        progressHandle.remove();
+      }
+
+      const durationSec = Math.max(0.001, (performance.now() - start) / 1000);
+      const finalSpeed = `${(lastBytes / (1024 * 1024) / durationSec).toFixed(2)} MB/s`;
+
+      return {
+        filePath: downloadRes.path || targetPath,
+        fileSize: lastBytes,
+        speed: finalSpeed,
+      };
+    } catch (err: any) {
+      if (progressHandle) progressHandle.remove();
+      console.warn('[Filesystem] Falha no downloadFile nativo, caindo para fallback stream:', err);
+    }
+  }
+
   const res = await fetch(downloadUrl, {
     headers: {
       'X-Sync-Token': token,
@@ -235,6 +303,7 @@ export async function downloadFileWithProgress(
   const reader = res.body.getReader();
   const chunks: Uint8Array[] = [];
   let loaded = 0;
+  let lastProgressTime = 0;
 
   while (true) {
     const { done, value } = await reader.read();
@@ -242,15 +311,20 @@ export async function downloadFileWithProgress(
     if (value) {
       chunks.push(value);
       loaded += value.length;
-      const elapsedSec = Math.max(0.001, (performance.now() - start) / 1000);
-      const speedMBs = (loaded / (1024 * 1024) / elapsedSec).toFixed(2);
-      const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
-      onProgress?.({
-        percent,
-        speed: `${speedMBs} MB/s`,
-        loaded,
-        total: total || loaded,
-      });
+      const now = performance.now();
+      const isComplete = total > 0 && loaded >= total;
+      if (isComplete || now - lastProgressTime >= 100) {
+        lastProgressTime = now;
+        const elapsedSec = Math.max(0.001, (now - start) / 1000);
+        const speedMBs = (loaded / (1024 * 1024) / elapsedSec).toFixed(2);
+        const percent = total > 0 ? Math.min(100, Math.round((loaded / total) * 100)) : 0;
+        onProgress?.({
+          percent,
+          speed: `${speedMBs} MB/s`,
+          loaded,
+          total: total || loaded,
+        });
+      }
     }
   }
 
@@ -331,18 +405,24 @@ export async function uploadFileToPcStream(
     xhr.setRequestHeader('X-File-Name', encodeURIComponent(safeFile));
     xhr.setRequestHeader('X-File-Id', id);
 
+    let lastProgressTime = 0;
     if (xhr.upload && onProgress) {
       xhr.upload.onprogress = (evt) => {
         if (evt.lengthComputable) {
-          const elapsedSec = Math.max(0.001, (performance.now() - start) / 1000);
-          const speedMBs = (evt.loaded / (1024 * 1024) / elapsedSec).toFixed(2);
-          const percent = Math.min(100, Math.round((evt.loaded / evt.total) * 100));
-          onProgress({
-            percent,
-            speed: `${speedMBs} MB/s`,
-            loaded: evt.loaded,
-            total: evt.total,
-          });
+          const now = performance.now();
+          const isComplete = evt.loaded >= evt.total;
+          if (isComplete || now - lastProgressTime >= 100) {
+            lastProgressTime = now;
+            const elapsedSec = Math.max(0.001, (now - start) / 1000);
+            const speedMBs = (evt.loaded / (1024 * 1024) / elapsedSec).toFixed(2);
+            const percent = Math.min(100, Math.round((evt.loaded / evt.total) * 100));
+            onProgress({
+              percent,
+              speed: `${speedMBs} MB/s`,
+              loaded: evt.loaded,
+              total: evt.total,
+            });
+          }
         }
       };
     }

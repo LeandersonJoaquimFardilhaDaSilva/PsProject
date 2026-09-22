@@ -11,6 +11,7 @@ interface TitleBarProps {
   onOpenSync: () => void;
   syncConnected?: boolean;
   isWebSocketActive?: boolean;
+  activeClientsCount?: number;
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
 }
@@ -23,6 +24,7 @@ export function TitleBar({
   onOpenSync,
   syncConnected,
   isWebSocketActive,
+  activeClientsCount,
   onToggleSidebar,
   onOpenSettings,
 }: TitleBarProps) {
@@ -96,22 +98,26 @@ export function TitleBar({
 
         {isWebSocketActive ? (
           <div
-            className="flex items-center gap-1.5 rounded-full border border-[#26de81]/30 bg-[#26de81]/15 px-2.5 py-1 text-[#26de81]"
-            title="Conectado em tempo real via WebSocket push"
+            className="flex items-center gap-1.5 rounded-full border border-[#26de81]/30 bg-[#26de81]/15 px-1 py-1 text-[#26de81]"
+            title={
+              isElectron
+                ? activeClientsCount && activeClientsCount > 0
+                  ? `Conectado em tempo real com o celular (${activeClientsCount} aparelho${activeClientsCount > 1 ? 's' : ''})`
+                  : 'Servidor ativo na rede local'
+                : 'Conectado em tempo real via WebSocket push com o PC'
+            }
           >
             <span className="relative flex h-2 w-2">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#26de81] opacity-75"></span>
               <span className="relative inline-flex rounded-full h-2 w-2 bg-[#26de81]"></span>
             </span>
-            <span className="text-xs font-semibold">Tempo Real</span>
           </div>
         ) : (
           <div
-            className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#661e1e65]/20 bg-[#661e1e65]/10 px-2.5 py-1"
+            className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#661e1e65]/20 bg-[#661e1e65]/10 px-1 py-1"
             title="Modo offline — dados salvos neste dispositivo"
           >
             <WifiOff size={12} className="text-[#d40000]" />
-            <span className="text-xs font-medium text-[#b40000]">Offline</span>
           </div>
         )}
 
@@ -125,7 +131,13 @@ export function TitleBar({
           title="Sincronização bidirecional PC ↔ Celular via QR Code"
         >
           <QrCode size={12} />
-          <span className="hidden xs:inline">{isElectron ? 'Celular' : 'Sync'}</span>
+          <span className="hidden xs:inline">
+            {isElectron
+              ? activeClientsCount && activeClientsCount > 0
+                ? `Celular (${activeClientsCount})`
+                : 'Celular'
+              : 'Sync'}
+          </span>
         </button>
 
         <button

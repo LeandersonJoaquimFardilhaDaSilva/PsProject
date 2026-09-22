@@ -174,14 +174,16 @@ export function useFlowStore() {
 
   const replaceStoreData = useCallback(
     (newChannels: Channel[], newFlows: FlowItem[], deletedChannelIds?: string[], deletedFlowIds?: string[]) => {
-      if (deletedChannelIds) saveDeletedChannelIds(deletedChannelIds);
-      if (deletedFlowIds) saveDeletedFlowIds(deletedFlowIds);
-      memoryRef.current.channels = newChannels;
-      memoryRef.current.flows = newFlows;
-      saveChannels(newChannels);
-      saveFlows(newFlows);
-      setChannels(newChannels);
-      setFlows(newFlows);
+      if (deletedChannelIds && Array.isArray(deletedChannelIds)) saveDeletedChannelIds(deletedChannelIds);
+      if (deletedFlowIds && Array.isArray(deletedFlowIds)) saveDeletedFlowIds(deletedFlowIds);
+      const safeChannels = Array.isArray(newChannels) ? newChannels : [];
+      const safeFlows = Array.isArray(newFlows) ? newFlows : [];
+      memoryRef.current.channels = safeChannels;
+      memoryRef.current.flows = safeFlows;
+      saveChannels(safeChannels);
+      saveFlows(safeFlows);
+      setChannels(safeChannels);
+      setFlows(safeFlows);
     },
     []
   );

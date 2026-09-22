@@ -13,6 +13,11 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         android.webkit.WebView.setWebContentsDebuggingEnabled(true);
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            android.webkit.WebSettings webSettings = getBridge().getWebView().getSettings();
+            webSettings.setMixedContentMode(android.webkit.WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
+            webSettings.setDomStorageEnabled(true);
+        }
         readShareIntent(getIntent());
     }
 

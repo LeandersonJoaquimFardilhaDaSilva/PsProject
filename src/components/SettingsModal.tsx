@@ -43,6 +43,7 @@ interface SettingsModalProps {
   isWsConnected?: boolean;
   isElectron?: boolean;
   serverUrl?: string;
+  activeClientsCount?: number;
 }
 
 export function SettingsModal({
@@ -52,6 +53,7 @@ export function SettingsModal({
   isWsConnected = false,
   isElectron = false,
   serverUrl,
+  activeClientsCount = 0,
 }: SettingsModalProps) {
   const [activeTab, setActiveTab] = useState<'preview' | 'network' | 'about'>('preview');
   const [settings, setSettings] = useState<PreviewSettings>(() => loadPreviewSettings());
@@ -197,7 +199,7 @@ export function SettingsModal({
             }`}
           >
             <Link2 size={14} />
-            <span>Geração de Preview</span>
+            <span>metadata</span>
           </button>
           <button
             onClick={() => setActiveTab('network')}
@@ -236,7 +238,7 @@ export function SettingsModal({
               <div className="rounded-2xl border border-white/5 bg-white/[0.02] p-4 space-y-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div>
-                    <h3 className="text-sm font-semibold text-white">Playground de Garimpo de Dados</h3>
+                    <h3 className="text-sm font-semibold text-white">teste de coleta de metadata</h3>
                     <p className="text-xs text-white/40">
                       Teste cada provedor isoladamente ou a cascata completa com qualquer URL.
                     </p>
@@ -505,7 +507,9 @@ export function SettingsModal({
                           }`}
                         />
                         {isElectron
-                          ? 'Servidor Local Ativo'
+                          ? activeClientsCount > 0
+                            ? `Servidor Ativo (${activeClientsCount} conectado${activeClientsCount > 1 ? 's' : ''})`
+                            : 'Servidor Ativo'
                           : isWsConnected
                           ? 'Conectado ao PC'
                           : 'Desconectado'}
@@ -513,7 +517,9 @@ export function SettingsModal({
                     </div>
                     <p className="text-xs text-white/40 mt-0.5">
                       {isElectron
-                        ? 'Pronto para trocar sinais e responder pings em tempo real com o celular'
+                        ? activeClientsCount > 0
+                          ? `${activeClientsCount} dispositivo(s) conectado(s) e trocando sinais em tempo real via WebSocket push`
+                          : 'Servidor local pronto na rede Wi-Fi. Escaneie o QR Code no celular para conectar'
                         : serverUrl
                         ? `Endereço do Servidor PC: ${serverUrl}`
                         : 'Configure a conexão no menu de sincronização'}

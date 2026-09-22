@@ -32,6 +32,9 @@ export function saveSyncConfig(config: SyncConfig | null) {
     } else {
       localStorage.removeItem(SYNC_CONFIG_KEY);
     }
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('flow-sync-config-updated', { detail: config }));
+    }
   } catch {
     // storage full or unavailable
   }
@@ -43,19 +46,26 @@ export function saveSyncConfig(config: SyncConfig | null) {
  * e que itens excluídos em qualquer dos dispositivos não retornem.
  */
 export function reconcileSyncData(local: SyncData, incoming: SyncData): SyncData {
+  const safeLocalDeletedChannels = Array.isArray(local?.deletedChannelIds) ? local.deletedChannelIds : [];
+  const safeIncomingDeletedChannels = Array.isArray(incoming?.deletedChannelIds) ? incoming.deletedChannelIds : [];
   const mergedDeletedChannels = new Set([
-    ...(local.deletedChannelIds || []),
-    ...(incoming.deletedChannelIds || []),
+    ...safeLocalDeletedChannels,
+    ...safeIncomingDeletedChannels,
   ]);
 
+  const safeLocalDeletedFlows = Array.isArray(local?.deletedFlowIds) ? local.deletedFlowIds : [];
+  const safeIncomingDeletedFlows = Array.isArray(incoming?.deletedFlowIds) ? incoming.deletedFlowIds : [];
   const mergedDeletedFlows = new Set([
-    ...(local.deletedFlowIds || []),
-    ...(incoming.deletedFlowIds || []),
+    ...safeLocalDeletedFlows,
+    ...safeIncomingDeletedFlows,
   ]);
+
+  const safeLocalChannels = Array.isArray(local?.channels) ? local.channels : [];
+  const safeIncomingChannels = Array.isArray(incoming?.channels) ? incoming.channels : [];
 
   // Reconciliar canais
   const channelMap = new Map<string, Channel>();
-  for (const ch of [...(local.channels || []), ...(incoming.channels || [])]) {
+  for (const ch of [...safeLocalChannels, ...safeIncomingChannels]) {
     if (!ch || !ch.id) continue;
     if (mergedDeletedChannels.has(ch.id)) continue;
 
@@ -73,9 +83,12 @@ export function reconcileSyncData(local: SyncData, incoming: SyncData): SyncData
     }
   }
 
+  const safeLocalFlows = Array.isArray(local?.flows) ? local.flows : [];
+  const safeIncomingFlows = Array.isArray(incoming?.flows) ? incoming.flows : [];
+
   // Reconciliar flows / mensagens
   const flowMap = new Map<string, FlowItem>();
-  for (const flow of [...(local.flows || []), ...(incoming.flows || [])]) {
+  for (const flow of [...safeLocalFlows, ...safeIncomingFlows]) {
     if (!flow || !flow.id) continue;
     if (mergedDeletedFlows.has(flow.id)) continue;
     // Se o canal pai foi excluído, o item também não deve existir
@@ -128,6 +141,7 @@ export class WebSocketSyncClient {
   private reconnectTimer: any = null;
   private pingInterval: any = null;
   private lastPongTime = Date.now();
+  private reconnectAttempts = 0;
   private isDestroyed = false;
 
   constructor(
@@ -150,8 +164,32 @@ export class WebSocketSyncClient {
     this.onDirectEvent = onDirectEvent;
     this.onNetPing = onNetPing;
     this.onNetPong = onNetPong;
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', this.handleVisibilityChange);
+    }
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', this.handleOnline);
+    }
+
     this.connect();
   }
+
+  private handleVisibilityChange = () => {
+    if (this.isDestroyed) return;
+    if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+      console.log('[WebSocketSync] App voltou ao primeiro plano, verificando socket...');
+      if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+        this.reconnectNow();
+      }
+    }
+  };
+
+  private handleOnline = () => {
+    if (this.isDestroyed) return;
+    console.log('[WebSocketSync] Rede online detectada, restabelecendo conexão...');
+    this.reconnectNow();
+  };
 
   setNetTestHandlers(
     onNetPing?: (data: { seq: number; timestamp: number; origin: string }) => void,
@@ -165,8 +203,47 @@ export class WebSocketSyncClient {
     this.onDirectEvent = handler;
   }
 
+  updateConfig(serverUrl: string, token: string) {
+    if (this.serverUrl !== serverUrl || this.token !== token) {
+      this.serverUrl = serverUrl;
+      this.token = token;
+      this.reconnectNow();
+    }
+  }
+
+  private cleanupWs() {
+    this.stopPing();
+    if (this.ws) {
+      try {
+        this.ws.onopen = null;
+        this.ws.onclose = null;
+        this.ws.onerror = null;
+        this.ws.onmessage = null;
+        if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+          this.ws.close();
+        }
+      } catch {
+        // ignore
+      }
+      this.ws = null;
+    }
+  }
+
+  reconnectNow() {
+    if (this.isDestroyed) return;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectAttempts = 0;
+    this.cleanupWs();
+    this.connect();
+  }
+
   connect() {
     if (this.isDestroyed) return;
+    this.cleanupWs();
+
     try {
       this.onStatusChange('connecting');
       let wsUrl = this.serverUrl
@@ -178,10 +255,12 @@ export class WebSocketSyncClient {
       }
       const fullUrl = `${wsUrl}/ws?token=${encodeURIComponent(this.token)}`;
 
-      this.ws = new WebSocket(fullUrl);
+      const socket = new WebSocket(fullUrl);
+      this.ws = socket;
 
-      this.ws.onopen = () => {
-        if (this.isDestroyed) return;
+      socket.onopen = () => {
+        if (this.isDestroyed || this.ws !== socket) return;
+        this.reconnectAttempts = 0;
         this.lastPongTime = Date.now();
         this.onStatusChange('connected');
         console.log('[WebSocketSync] Conectado em tempo real com o PC!');
@@ -196,15 +275,16 @@ export class WebSocketSyncClient {
               // ignore
             }
           }
-          // Se não receber sinal há mais de 30s, reconecta
-          if (Date.now() - this.lastPongTime > 30000) {
-            console.warn('[WebSocketSync] Timeout de heartbeat, reconectando...');
-            this.ws?.close();
+          // Se não receber sinal há mais de 35s, força reconexão
+          if (Date.now() - this.lastPongTime > 35000) {
+            console.warn('[WebSocketSync] Timeout de heartbeat (35s), reconectando...');
+            this.reconnectNow();
           }
         }, 10000);
       };
 
-      this.ws.onmessage = (event) => {
+      socket.onmessage = (event) => {
+        if (this.isDestroyed || this.ws !== socket) return;
         try {
           const msg = JSON.parse(event.data);
           this.lastPongTime = Date.now();
@@ -236,17 +316,22 @@ export class WebSocketSyncClient {
         }
       };
 
-      this.ws.onclose = () => {
+      socket.onclose = () => {
+        if (this.isDestroyed || this.ws !== socket) return;
         this.stopPing();
         this.onStatusChange('disconnected');
         this.scheduleReconnect();
       };
 
-      this.ws.onerror = () => {
+      socket.onerror = (err) => {
+        if (this.isDestroyed || this.ws !== socket) return;
+        console.warn('[WebSocketSync] Erro no socket cliente:', err);
         this.stopPing();
         this.onStatusChange('disconnected');
+        this.scheduleReconnect();
       };
-    } catch {
+    } catch (err) {
+      console.error('[WebSocketSync] Erro ao instanciar WebSocket:', err);
       this.stopPing();
       this.onStatusChange('disconnected');
       this.scheduleReconnect();
@@ -310,20 +395,28 @@ export class WebSocketSyncClient {
 
   scheduleReconnect() {
     if (this.isDestroyed || this.reconnectTimer) return;
+    const delay = Math.min(10000, Math.floor(1500 * Math.pow(1.35, Math.min(this.reconnectAttempts, 8))));
+    this.reconnectAttempts++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.connect();
-    }, 2000);
+    }, delay);
   }
 
   destroy() {
     this.isDestroyed = true;
-    this.stopPing();
-    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
-    if (this.ws) {
-      this.ws.close();
-      this.ws = null;
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     }
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('online', this.handleOnline);
+    }
+    this.stopPing();
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.cleanupWs();
   }
 }
 
@@ -372,10 +465,10 @@ export async function sendSyncRequestToPc(
 
   const result = await response.json();
   return {
-    channels: result.channels || [],
-    flows: result.flows || [],
-    deletedChannelIds: result.deletedChannelIds || [],
-    deletedFlowIds: result.deletedFlowIds || [],
+    channels: Array.isArray(result?.channels) ? result.channels : [],
+    flows: Array.isArray(result?.flows) ? result.flows : [],
+    deletedChannelIds: Array.isArray(result?.deletedChannelIds) ? result.deletedChannelIds : [],
+    deletedFlowIds: Array.isArray(result?.deletedFlowIds) ? result.deletedFlowIds : [],
   };
 }
 
