@@ -10,14 +10,16 @@ import {
   Check,
   Plus,
   X,
-  Loader2,
   FileText,
   FolderOpen,
   Terminal,
   Zap,
   Download,
   Film,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
+import { PendulumLoader } from '@/components/PendulumLoader';
 import type { FlowItem, FlowLogEntry } from '@/types';
 import { getDomain, isValidImageUrl } from '@/lib/linkPreview';
 import { getFileCategory, formatBytes, getRegisteredOriginalFile } from '@/lib/fileTransferEngine';
@@ -46,6 +48,12 @@ function isVideoFile(fileName?: string, fileType?: string): boolean {
   return /\.(mp4|webm|ogg|mov|mkv)$/i.test(fileName);
 }
 
+function isPdfFile(fileName?: string, fileType?: string): boolean {
+  if (fileType && (fileType.toLowerCase() === 'pdf' || fileType.toLowerCase() === 'application/pdf')) return true;
+  if (!fileName) return false;
+  return /\.pdf$/i.test(fileName);
+}
+
 export function FlowCard({
   item,
   onDelete,
@@ -62,10 +70,13 @@ export function FlowCard({
   const [showLogs, setShowLogs] = useState(false);
   const [devTools, setDevTools] = useState(() => loadDevToolsSettings());
   const [resolvedVideoUrl, setResolvedVideoUrl] = useState<string | null>(null);
+  const [resolvedPdfUrl, setResolvedPdfUrl] = useState<string | null>(null);
+  const [pdfPage, setPdfPage] = useState(1);
 
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
   const hasErrors = item.logs?.some((l) => l.level === 'error');
   const isVideo = item.type === 'file' && isVideoFile(item.fileName, item.fileType);
+  const isPdf = item.type === 'file' && isPdfFile(item.fileName, item.fileType);
 
   // Escuta alterações de configurações do Dev-Tools em tempo real
   useEffect(() => {
@@ -134,6 +145,64 @@ export function FlowCard({
     }
   }, [item.id, item.filePath, item.fileName, item.videoData, isVideo, isElectron]);
 
+  // Resolução de URL para exibição de PDF no leitor nativo via iframe
+  useEffect(() => {
+    if (!isPdf) return;
+
+    // 1. Arquivo original em memória registrado neste aparelho
+    const reg = getRegisteredOriginalFile(item.id);
+    if (reg?.file) {
+      const u = URL.createObjectURL(reg.file);
+      setResolvedPdfUrl(u);
+      return () => URL.revokeObjectURL(u);
+    }
+
+    // 2. Dado em URL direta / base64
+    if (item.fileUrl) {
+      setResolvedPdfUrl(item.fileUrl);
+      return;
+    }
+
+    // 3. Mobile Capacitor (arquivo local baixado no dispositivo)
+    if (typeof window !== 'undefined' && (window as any).Capacitor?.isNativePlatform?.() && item.filePath) {
+      try {
+        const src = (window as any).Capacitor.convertFileSrc(item.filePath);
+        setResolvedPdfUrl(src);
+        return;
+      } catch {
+        // continua
+      }
+    }
+
+    // 4. Servidor de sincronização via HTTP
+    const syncConfig = loadSyncConfig();
+    if (syncConfig?.serverUrl && syncConfig.token && item.fileName) {
+      let base = syncConfig.serverUrl.replace(/\/+$/, '');
+      if (!/^https?:\/\//i.test(base)) base = `http://${base}`;
+      setResolvedPdfUrl(
+        `${base}/api/files/download?fileId=${encodeURIComponent(item.id)}&fileName=${encodeURIComponent(
+          item.fileName
+        )}&token=${encodeURIComponent(syncConfig.token)}&inline=1`
+      );
+      return;
+    }
+
+    // 5. Desktop Electron: busca stream local na porta do syncServer
+    if (isElectron && item.filePath && window.electronAPI?.getSyncInfo) {
+      window.electronAPI.getSyncInfo().then((info) => {
+        if (info?.port && info?.token) {
+          setResolvedPdfUrl(
+            `http://127.0.0.1:${info.port}/api/files/download?fileId=${encodeURIComponent(
+              item.id
+            )}&filePath=${encodeURIComponent(item.filePath!)}&token=${encodeURIComponent(
+              info.token
+            )}&inline=1`
+          );
+        }
+      });
+    }
+  }, [item.id, item.filePath, item.fileName, item.fileUrl, isPdf, isElectron]);
+
   function copyContent() {
     const value =
       item.type === 'link'
@@ -181,14 +250,14 @@ export function FlowCard({
 
         {/* Top Header do Card */}
         <div className="mb-2.5 flex items-center gap-2">
-          <TypeBadge type={isVideo ? 'video' : item.type} />
+          <TypeBadge type={isVideo ? 'video' : isPdf ? 'pdf' : item.type} />
           <span className="text-xs text-white/30">{timeAgo(item.createdAt)}</span>
           {item.siteName && (
             <span className="truncate text-xs text-white/40">· {item.siteName}</span>
           )}
           {item.isLoadingPreview && (
-            <span className="flex items-center gap-1 rounded-full bg-[#00e5ff]/10 px-2 py-0.5 text-[10px] font-medium text-[#00e5ff]">
-              <Loader2 size={10} className="animate-spin" /> Buscando dados...
+            <span className="flex items-center gap-1.5 rounded-full bg-[#00e5ff]/10 px-2 py-0.5 text-[10px] font-medium text-[#00e5ff]">
+              <PendulumLoader size={11} color="#00e5ff" /> Buscando dados...
             </span>
           )}
           {item.transferSpeed && (
@@ -251,7 +320,7 @@ export function FlowCard({
                 }
               >
                 {downloadProgress?.isDownloading ? (
-                  <Loader2 size={14} className="animate-spin text-[#00e5ff]" />
+                  <PendulumLoader size={14} color="#00e5ff" />
                 ) : downloadProgress?.isSuccess ? (
                   <Check size={14} className="text-[#26de81]" />
                 ) : (
@@ -283,8 +352,8 @@ export function FlowCard({
 
         {/* 1. Card de Link — Texto Selecionável */}
         {item.type === 'link' && item.isLoadingPreview && (
-          <div className="mb-3 flex h-24 items-center justify-center gap-2.5 rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 text-xs text-[#00e5ff] animate-pulse">
-            <Loader2 size={16} className="animate-spin text-[#00e5ff]" />
+          <div className="mb-3 flex h-24 items-center justify-center gap-3 rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 text-xs text-[#00e5ff] animate-pulse">
+            <PendulumLoader size={20} color="#00e5ff" />
             <span className="font-medium">Buscando informações do link em segundo plano...</span>
           </div>
         )}
@@ -439,13 +508,91 @@ export function FlowCard({
               </div>
             )}
 
+            {/* Leitor de PDF Leve com iframe e navegação por setas (Requisito 4) */}
+            {isPdf && (
+              <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0c0c14] shadow-md">
+                {resolvedPdfUrl ? (
+                  <div className="flex flex-col">
+                    <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-3.5 py-2">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <FileText size={15} className="text-red-400 shrink-0" />
+                        <span className="text-xs font-semibold text-white/90 truncate">
+                          {item.fileName || 'Documento PDF'}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => setPdfPage((p) => Math.max(1, p - 1))}
+                          disabled={pdfPage <= 1}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-white/5 cursor-pointer"
+                          title="Página anterior"
+                          aria-label="Página anterior"
+                        >
+                          <ChevronLeft size={16} />
+                        </button>
+                        <span className="min-w-14 text-center font-mono text-xs text-white/80">
+                          Pág. {pdfPage}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPdfPage((p) => p + 1)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
+                          title="Próxima página"
+                          aria-label="Próxima página"
+                        >
+                          <ChevronRight size={16} />
+                        </button>
+                      </div>
+                    </div>
+                    <div className="relative w-full h-80 bg-neutral-900 overflow-hidden">
+                      <iframe
+                        key={`pdf-${item.id}-p${pdfPage}`}
+                        src={`${resolvedPdfUrl}#page=${pdfPage}&view=FitH`}
+                        className="w-full h-full border-0 bg-white"
+                        title={item.fileName || 'Leitor de PDF'}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="flex h-32 flex-col items-center justify-center gap-2 p-4 text-center text-xs text-white/40">
+                    <FileText size={24} className="text-red-400" />
+                    <span>Leitor de PDF pronto</span>
+                    <span className="text-[11px] text-white/30">
+                      Clique em Baixar abaixo para ler o documento no app
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3.5 transition hover:bg-white/[0.04]">
               <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
                 <div
-                  className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-lg"
-                  style={{ backgroundColor: fileCategory?.color || '#a29bfe' }}
+                  className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-lg overflow-hidden border border-white/10"
+                  style={{ backgroundColor: isPdf ? '#e74c3c' : fileCategory?.color || '#a29bfe' }}
                 >
-                  {isVideo ? <Film size={18} /> : fileCategory?.extension || 'FILE'}
+                  {isVideo ? (
+                    <Film size={18} />
+                  ) : isPdf ? (
+                    resolvedPdfUrl ? (
+                      <div className="relative h-full w-full bg-white overflow-hidden pointer-events-none select-none">
+                        <iframe
+                          src={`${resolvedPdfUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
+                          className="pointer-events-none select-none absolute top-0 left-0 w-[240px] h-[240px] origin-top-left scale-[0.183] border-0 bg-white"
+                          tabIndex={-1}
+                          scrolling="no"
+                          title="Miniatura PDF"
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex h-full w-full items-center justify-center bg-red-600 text-[10px] font-bold text-white">
+                        PDF
+                      </div>
+                    )
+                  ) : (
+                    fileCategory?.extension || 'FILE'
+                  )}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-white truncate max-w-full">
@@ -481,7 +628,7 @@ export function FlowCard({
                   >
                     {downloadProgress?.isDownloading ? (
                       <>
-                        <Loader2 size={13} className="animate-spin text-[#00e5ff]" />
+                        <PendulumLoader size={13} color="#00e5ff" />
                         <span>{downloadProgress.percent}%</span>
                       </>
                     ) : downloadProgress?.isSuccess ? (
@@ -517,7 +664,7 @@ export function FlowCard({
               <div className="rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 p-3 animate-in fade-in duration-200">
                 <div className="flex items-center justify-between text-xs mb-1.5">
                   <span className="flex items-center gap-1.5 font-medium text-[#00e5ff]">
-                    <Loader2 size={12} className="animate-spin" />
+                    <PendulumLoader size={12} color="#00e5ff" />
                     Baixando arquivo... {downloadProgress.percent}%
                   </span>
                   <span className="text-white/50 text-[11px]">
@@ -583,7 +730,7 @@ export function FlowCard({
                 className="flex items-center gap-1.5 rounded-lg bg-black/70 px-3 py-1.5 text-xs font-medium text-white backdrop-blur border border-white/20 hover:bg-black/90"
               >
                 {downloadProgress?.isDownloading ? (
-                  <Loader2 size={13} className="animate-spin text-[#00e5ff]" />
+                  <PendulumLoader size={13} color="#00e5ff" />
                 ) : (
                   <Download size={13} className="text-[#00e5ff]" />
                 )}
@@ -616,13 +763,14 @@ function LogLevelBadge({ level }: { level: FlowLogEntry['level'] }) {
   }
 }
 
-function TypeBadge({ type }: { type: FlowItem['type'] | 'video' }) {
+function TypeBadge({ type }: { type: FlowItem['type'] | 'video' | 'pdf' }) {
   const config = {
     link: { icon: Link2, color: 'text-[#00e5ff] bg-[#00e5ff]/10' },
     text: { icon: MessageSquare, color: 'text-[#ff9f43] bg-[#ff9f43]/10' },
     image: { icon: ImageIcon, color: 'text-[#26de81] bg-[#26de81]/10' },
     file: { icon: FileText, color: 'text-[#a29bfe] bg-[#a29bfe]/10' },
     video: { icon: Film, color: 'text-[#ff6b81] bg-[#ff6b81]/10' },
+    pdf: { icon: FileText, color: 'text-red-400 bg-red-500/10' },
   };
   const { icon: Icon, color } = (config as any)[type] || config.text;
   return (

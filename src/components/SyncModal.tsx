@@ -15,6 +15,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { Capacitor } from '@capacitor/core';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
+import { PendulumLoader } from '@/components/PendulumLoader';
 import type { SyncServerInfo } from '@/electron';
 import {
   loadSyncConfig,
@@ -294,7 +295,7 @@ export function SyncModal({
                   </div>
                 ) : (
                   <div className="flex h-52 w-52 items-center justify-center rounded-2xl border border-dashed border-white/20">
-                    <RefreshCw size={24} className="animate-spin text-white/40" />
+                    <PendulumLoader size={36} color="#ffffff" />
                   </div>
                 )}
 
@@ -415,7 +416,11 @@ export function SyncModal({
                     disabled={isSyncing}
                     className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#00e5ff] px-4 py-2.5 text-xs font-semibold text-black transition hover:brightness-110 disabled:opacity-50"
                   >
-                    <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                    {isSyncing ? (
+                      <PendulumLoader size={14} color="#000000" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
                     {isSyncing ? 'Sincronizando...' : 'Conectar e Sincronizar'}
                   </button>
 

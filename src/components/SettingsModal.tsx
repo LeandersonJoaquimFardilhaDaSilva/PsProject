@@ -22,6 +22,7 @@ import {
   Trash2,
   Sliders,
 } from 'lucide-react';
+import { PendulumLoader } from '@/components/PendulumLoader';
 import {
   loadPreviewSettings,
   savePreviewSettings,
@@ -388,7 +389,7 @@ export function SettingsModal({
                     disabled={runningFullTest || !testUrl.trim()}
                     className="flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#00e5ff] to-[#ff3e6c] px-4 py-2 text-xs font-semibold text-white transition hover:opacity-90 disabled:opacity-50 shrink-0"
                   >
-                    <Zap size={14} className={runningFullTest ? 'animate-spin' : ''} />
+                    {runningFullTest ? <PendulumLoader size={14} color="#ffffff" /> : <Zap size={14} />}
                     {runningFullTest ? 'Testando...' : 'Testar Cascata Completa'}
                   </button>
                 </div>
@@ -534,7 +535,7 @@ export function SettingsModal({
                             disabled={isTesting || !testUrl.trim()}
                             className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-medium text-white/80 transition hover:bg-white/10 hover:text-white disabled:opacity-40"
                           >
-                            <Play size={12} className={isTesting ? 'animate-spin' : ''} />
+                            {isTesting ? <PendulumLoader size={12} color="#ffffff" /> : <Play size={12} />}
                             {isTesting ? 'Testando...' : `Testar ${prov.name.split(' ')[0]}`}
                           </button>
 

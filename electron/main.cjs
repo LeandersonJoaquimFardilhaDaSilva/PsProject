@@ -7,8 +7,11 @@ let mainWindow = null;
 let syncServerInstance = null;
 
 function createWindow() {
+  const appIcon = path.join(__dirname, '../assets/logo alt icon.ico');
+
   mainWindow = new BrowserWindow({
     title: 'Tove',
+    icon: fs.existsSync(appIcon) ? appIcon : undefined,
     width: 1100,
     height: 750,
     minWidth: 840,
@@ -21,6 +24,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      plugins: true,
     },
   });
 

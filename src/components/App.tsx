@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect, useRef } from 'react';
+import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
 import { Sparkles, AlertCircle } from 'lucide-react';
 import { useFlowStore } from '@/hooks/useFlowStore';
 import { useNetworkTest } from '@/hooks/useNetworkTest';
@@ -60,6 +60,18 @@ export function App() {
     lastDevice?: string;
     itemsCount?: number;
   }>({});
+  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+
+  const scrollToBottom = useCallback((smooth = true) => {
+    requestAnimationFrame(() => {
+      if (messagesEndRef.current) {
+        messagesEndRef.current.scrollIntoView({ behavior: smooth ? 'smooth' : 'auto' });
+      } else if (messagesContainerRef.current) {
+        messagesContainerRef.current.scrollTop = messagesContainerRef.current.scrollHeight;
+      }
+    });
+  }, []);
   const [downloadProgressMap, setDownloadProgressMap] = useState<
     Record<
       string,
@@ -179,6 +191,8 @@ export function App() {
         lastSyncTime: client.timestamp,
         lastDevice: client.device,
       }));
+      // Sincroniza mensagens automaticamente com o aparelho recém-conectado
+      broadcastDataChange();
     });
 
     window.electronAPI.getSyncInfo?.().then((info) => {
@@ -195,6 +209,8 @@ export function App() {
           lastSyncTime: Date.now(),
           lastDevice: 'Celular (WebSocket)',
         }));
+        // Sincroniza mensagens automaticamente com os clientes conectados
+        broadcastDataChange();
       }
     });
 
@@ -345,6 +361,27 @@ export function App() {
       return;
     }
 
+    // Auto-sync imediato de mensagens na inicialização
+    sendSyncRequestToPc(config.serverUrl, config.token, storeRef.current.getSyncPayload(), 'Cliente')
+      .then((merged) => {
+        if (merged) {
+          storeRef.current.replaceStoreData(
+            merged.channels,
+            merged.flows,
+            merged.deletedChannelIds,
+            merged.deletedFlowIds
+          );
+          setSyncActivity({
+            lastSyncTime: Date.now(),
+            lastDevice: 'PC (Sync Automático)',
+            itemsCount: merged.flows.length,
+          });
+        }
+      })
+      .catch((err) => {
+        console.log('[App] Auto-sync inicial aguardando WebSocket...', err?.message);
+      });
+
     const wsClient = new WebSocketSyncClient(
       config.serverUrl,
       config.token,
@@ -377,6 +414,11 @@ export function App() {
       },
       (status) => {
         setIsWsConnected(status === 'connected');
+        if (status === 'connected') {
+          // Toda vez que conectar automaticamente, dispara sincronização de mensagens
+          console.log('[App] Conectado via WebSocket! Executando sincronização automática de mensagens...');
+          wsClient.sendSyncRequest(storeRef.current.getSyncPayload());
+        }
       },
       // onRequestFileTransfer: quando o PC solicita o arquivo original presente no celular
       async (req) => {
@@ -502,8 +544,18 @@ export function App() {
           f.imageName?.toLowerCase().includes(q)
       );
     }
-    return [...items].sort((a, b) => b.createdAt - a.createdAt);
+    return [...items].sort((a, b) => a.createdAt - b.createdAt);
   }, [activeChannel, store.flows, filter, search]);
+
+  // Rola para o final ao trocar de canal
+  useEffect(() => {
+    scrollToBottom(false);
+  }, [store.activeChannelId, scrollToBottom]);
+
+  // Rola suavemente para baixo quando novas mensagens forem adicionadas
+  useEffect(() => {
+    scrollToBottom(true);
+  }, [visibleFlows.length, scrollToBottom]);
 
   function handleCreateChannel() {
     setCreatingChannel(true);
@@ -900,7 +952,10 @@ export function App() {
             </div>
           )}
 
-          <div className="flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-6 w-full max-w-full min-w-0">
+          <div
+            ref={messagesContainerRef}
+            className="flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-6 w-full max-w-full min-w-0"
+          >
             {!activeChannel && <EmptyState onCreate={handleCreateChannel} />}
             {activeChannel && visibleFlows.length === 0 && (
               <ChannelEmpty channelName={activeChannel.name} />
@@ -918,6 +973,7 @@ export function App() {
                     downloadProgress={downloadProgressMap[item.id]}
                   />
                 ))}
+                <div ref={messagesEndRef} className="h-1" />
               </div>
             )}
           </div>

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { Send, Loader2, X, Paperclip, Film, FileText } from 'lucide-react';
+import { Send, X, Paperclip, Film, FileText } from 'lucide-react';
+import { PendulumLoader } from '@/components/PendulumLoader';
 import type { FlowItem } from '@/types';
 import { fetchLinkPreview, isUrl, normalizeUrl, getDomain } from '@/lib/linkPreview';
 import { getFileCategory, formatBytes } from '@/lib/fileTransferEngine';
@@ -263,7 +264,7 @@ export function Composer({
           className="flex h-10 w-10 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff] text-white transition hover:opacity-90 disabled:opacity-30 shrink-0 shadow-lg"
           title="Enviar"
         >
-          {loading ? <Loader2 size={18} className="animate-spin" /> : <Send size={18} />}
+          {loading ? <PendulumLoader size={18} color="#ffffff" /> : <Send size={18} />}
         </button>
       </div>
     </div>

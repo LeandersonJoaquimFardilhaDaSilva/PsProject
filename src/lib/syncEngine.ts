@@ -309,6 +309,11 @@ export class WebSocketSyncClient {
             return;
           }
 
+          if (msg.type === 'connected') {
+            this.onStatusChange('connected');
+            return;
+          }
+
           if (msg.type === 'sync_data_updated' || msg.type === 'sync_response') {
             this.onDataUpdated(msg.data);
           } else if (msg.type === 'file_uploaded') {

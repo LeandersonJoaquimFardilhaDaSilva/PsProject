@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Loading Pêndulo - Grid 3x3</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at 50% 40%, #151d2d 0%, #070b14 100%);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      color: #f1f5f9;
+      overflow: hidden;
+    }
+
+    /* Container do Loader */
+    .loader-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 48px;
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 28px;
+      box-shadow: 0 25px 60px rgba(0, 0, 0, 0.6);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
+
+    /* Div com os 9 quadrados no estilo Grid 3x3 */
+    .loader-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 52px);
+      grid-template-rows: repeat(3, 52px);
+      gap: 12px;
+      padding: 24px;
+    }
+
+    /* Quadrados brancos com cantos arredondados */
+    .square {
+      width: 52px;
+      height: 52px;
+      background-color: #ffffff;
+      border-radius: 12px;
+      box-shadow: 
+        0 8px 24px rgba(255, 255, 255, 0.2),
+        0 4px 10px rgba(0, 0, 0, 0.4);
+      /* Ponto de pivô acima do quadrado para balançar como pêndulo */
+      transform-origin: 50% -55px;
+      will-change: transform;
+    }
+
+    /* ==========================================================
+       ANIMAÇÃO DE PÊNDULO EM CICLO
+       ========================================================== */
+
+    /* Coluna Esquerda: Quadrados 1, 4, 7 */
+    .col-left {
+      animation: swing-left 1.3s infinite;
+    }
+
+    /* Coluna Direita: Quadrados 3, 6, 9 */
+    .col-right {
+      animation: swing-right 1.3s infinite;
+    }
+
+    /* 
+     * 1. Coluna esquerda abre para a direção oposta dos outros quadrados (esquerda)
+     * 2. Retorna para a posição inicial acelerando sob gravidade
+     * 3. Ao retornar (50%), a coluna direita faz o mesmo para o lado oposto (direita)
+     * 4. A coluna direita retorna (100%) e o ciclo reinicia
+     */
+
+    @keyframes swing-left {
+      0% {
+        transform: rotate(0deg);
+        animation-timing-function: cubic-bezier(0.05, 0.7, 0.25, 1); /* Disparo rápido após o impacto */
+      }
+      25% {
+        transform: rotate(35deg); /* Abre para fora (esquerda) */
+        animation-timing-function: cubic-bezier(0.65, 0.05, 0.95, 0.35); /* Queda acelerada por gravidade */
+      }
+      50% {
+        transform: rotate(0deg); /* Retorna à posição inicial com impacto */
+      }
+      51% {
+        transform: rotate(0deg) scaleX(0.96); /* Micro-impacto */
+      }
+      52%, 100% {
+        transform: rotate(0deg) scaleX(1); /* Permanece parada enquanto a direita oscila */
+      }
+    }
+
+    @keyframes swing-right {
+      0%, 50% {
+        transform: rotate(0deg) scaleX(1); /* Permanece parada enquanto a esquerda oscila */
+      }
+      50% {
+        transform: rotate(0deg);
+        animation-timing-function: cubic-bezier(0.05, 0.7, 0.25, 1); /* Disparo rápido após receber o impacto */
+      }
+      75% {
+        transform: rotate(-35deg); /* Abre para fora (direita) */
+        animation-timing-function: cubic-bezier(0.65, 0.05, 0.95, 0.35); /* Queda acelerada por gravidade */
+      }
+      100% {
+        transform: rotate(0deg); /* Retorna à posição inicial com impacto */
+      }
+    }
+
+    /* Texto de Carregando minimalista */
+    .loader-text {
+      margin-top: 28px;
+      font-size: 13px;
+      font-weight: 500;
+      letter-spacing: 3px;
+      text-transform: uppercase;
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- CONTAINER PRINCIPAL -->
+  <div class="loader-container">
+    <!-- DIV COM APENAS OS 9 QUADRADOS NO ESTILO GRID 3X3 -->
+    <div class="loader-grid">
+      <!-- Linha 1 -->
+      <div class="square col-left"></div>
+      <div class="square col-mid"></div>
+      <div class="square col-right"></div>
+
+      <!-- Linha 2 -->
+      <div class="square col-left"></div>
+      <div class="square col-mid"></div>
+      <div class="square col-right"></div>
+
+      <!-- Linha 3 -->
+      <div class="square col-left"></div>
+      <div class="square col-mid"></div>
+      <div class="square col-right"></div>
+    </div>
+
+    <!-- Texto de Carregando -->
+    <div class="loader-text">Carregando...</div>
+  </div>
+
+</body>
+</html>

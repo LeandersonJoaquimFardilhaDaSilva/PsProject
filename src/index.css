@@ -45,3 +45,52 @@
     transition-duration: 0ms !important;
   }
 }
+
+/* ==========================================================
+   ANIMAÇÃO DE PÊNDULO EM CICLO (9 QUADRADOS - loading.html)
+   ========================================================== */
+@keyframes pendulum-swing-left {
+  0% {
+    transform: rotate(0deg);
+    animation-timing-function: cubic-bezier(0.05, 0.7, 0.25, 1);
+  }
+  25% {
+    transform: rotate(35deg);
+    animation-timing-function: cubic-bezier(0.65, 0.05, 0.95, 0.35);
+  }
+  50% {
+    transform: rotate(0deg);
+  }
+  51% {
+    transform: rotate(0deg) scaleX(0.96);
+  }
+  52%, 100% {
+    transform: rotate(0deg) scaleX(1);
+  }
+}
+
+@keyframes pendulum-swing-right {
+  0%, 50% {
+    transform: rotate(0deg) scaleX(1);
+  }
+  50% {
+    transform: rotate(0deg);
+    animation-timing-function: cubic-bezier(0.05, 0.7, 0.25, 1);
+  }
+  75% {
+    transform: rotate(-35deg);
+    animation-timing-function: cubic-bezier(0.65, 0.05, 0.95, 0.35);
+  }
+  100% {
+    transform: rotate(0deg);
+  }
+}
+
+.pendulum-col-left {
+  animation: pendulum-swing-left 1.3s infinite;
+}
+
+.pendulum-col-right {
+  animation: pendulum-swing-right 1.3s infinite;
+}
+

@@ -332,7 +332,12 @@ function startSyncServer(options = {}) {
         return;
       }
 
-      const isInline = url.searchParams.get('stream') === '1' || mimeType.startsWith('video/') || mimeType.startsWith('image/');
+      const isInline =
+        url.searchParams.get('stream') === '1' ||
+        url.searchParams.get('inline') === '1' ||
+        mimeType === 'application/pdf' ||
+        mimeType.startsWith('video/') ||
+        mimeType.startsWith('image/');
 
       res.writeHead(200, {
         'Content-Type': mimeType,

@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { Link2, MessageSquare, Image as ImageIcon, X, Hash, FileText, AlertTriangle } from 'lucide-react';
+import { Link2, MessageSquare, Image as ImageIcon, X, FileText, AlertTriangle } from 'lucide-react';
+import { ChannelSquaresIcon } from '@/components/PendulumLoader';
 import type { Channel, FlowFilter } from '@/types';
 
 interface SidebarProps {
@@ -32,23 +33,19 @@ export function Sidebar({
 
   const sidebarContent = (
     <aside className="flex h-full w-72 md:w-64 flex-col border-r border-white/5 bg-[#0d0d12]">
-      <div className="flex items-center justify-between px-5 py-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff]">
-            <span className="text-sm font-black text-white">T</span>
-          </div>
-          <span className="text-lg font-bold tracking-tight text-white">Tove</span>
-        </div>
-        {onCloseMobile && (
+      {onCloseMobile ? (
+        <div className="flex items-center justify-end px-4 pt-3 pb-1 md:hidden">
           <button
             onClick={onCloseMobile}
-            className="rounded-lg p-1.5 text-white/40 hover:bg-white/5 hover:text-white md:hidden"
+            className="rounded-lg p-1.5 text-white/40 hover:bg-white/5 hover:text-white"
             title="Fechar menu"
           >
             <X size={18} />
           </button>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="pt-2" />
+      )}
 
       <div className="px-3 pb-2">
         <button
@@ -79,7 +76,7 @@ export function Sidebar({
                     onCloseMobile?.();
                   }}
                 >
-                  <Hash size={16} style={{ color: channel.color }} className="shrink-0" />
+                  <ChannelSquaresIcon color={channel.color} size={14} className="shrink-0" />
                   <span className="flex-1 truncate">{channel.name}</span>
                   {count > 0 && (
                     <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/50">{count}</span>
