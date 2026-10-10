@@ -16,10 +16,13 @@ import {
   Zap,
   Download,
   Film,
+  Eye,
   ChevronLeft,
   ChevronRight,
 } from 'lucide-react';
 import { PendulumLoader } from '@/components/PendulumLoader';
+import { PdfViewer } from '@/components/PdfViewer';
+import { generatePdfThumbnail, getCachedThumbnail, isPdfFile } from '@/lib/pdfHelper';
 import type { FlowItem, FlowLogEntry } from '@/types';
 import { getDomain, isValidImageUrl } from '@/lib/linkPreview';
 import { getFileCategory, formatBytes, getRegisteredOriginalFile } from '@/lib/fileTransferEngine';
@@ -31,6 +34,7 @@ interface FlowCardProps {
   onDelete: (id: string) => void;
   onTogglePin: (id: string) => void;
   onUpdateImage: (id: string, image: string) => void;
+  onUpdateFlowPreview?: (id: string, update: Partial<FlowItem>) => void;
   onDownloadItem?: (item: FlowItem) => Promise<void> | void;
   downloadProgress?: {
     percent: number;
@@ -48,17 +52,12 @@ function isVideoFile(fileName?: string, fileType?: string): boolean {
   return /\.(mp4|webm|ogg|mov|mkv)$/i.test(fileName);
 }
 
-function isPdfFile(fileName?: string, fileType?: string): boolean {
-  if (fileType && (fileType.toLowerCase() === 'pdf' || fileType.toLowerCase() === 'application/pdf')) return true;
-  if (!fileName) return false;
-  return /\.pdf$/i.test(fileName);
-}
-
 export function FlowCard({
   item,
   onDelete,
   onTogglePin,
   onUpdateImage,
+  onUpdateFlowPreview,
   onDownloadItem,
   downloadProgress,
 }: FlowCardProps) {
@@ -71,12 +70,53 @@ export function FlowCard({
   const [devTools, setDevTools] = useState(() => loadDevToolsSettings());
   const [resolvedVideoUrl, setResolvedVideoUrl] = useState<string | null>(null);
   const [resolvedPdfUrl, setResolvedPdfUrl] = useState<string | null>(null);
-  const [pdfPage, setPdfPage] = useState(1);
+  const [showPdfViewer, setShowPdfViewer] = useState(false);
+  const [pdfThumbnailImg, setPdfThumbnailImg] = useState<string | null>(item.pdfThumbnail || null);
+  const [generatingThumb, setGeneratingThumb] = useState(false);
 
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
   const hasErrors = item.logs?.some((l) => l.level === 'error');
   const isVideo = item.type === 'file' && isVideoFile(item.fileName, item.fileType);
   const isPdf = item.type === 'file' && isPdfFile(item.fileName, item.fileType);
+
+  // Geração e sincronização em cache da miniatura da 1ª página do PDF via Web Worker
+  useEffect(() => {
+    if (!isPdf) return;
+
+    if (item.pdfThumbnail) {
+      setPdfThumbnailImg(item.pdfThumbnail);
+      return;
+    }
+
+    const cached = getCachedThumbnail(item.id);
+    if (cached) {
+      setPdfThumbnailImg(cached);
+      onUpdateFlowPreview?.(item.id, { pdfThumbnail: cached });
+      return;
+    }
+
+    if (resolvedPdfUrl && !generatingThumb) {
+      let isCancelled = false;
+      setGeneratingThumb(true);
+
+      generatePdfThumbnail(resolvedPdfUrl, item.id)
+        .then((dataUrl) => {
+          if (isCancelled) return;
+          setPdfThumbnailImg(dataUrl);
+          onUpdateFlowPreview?.(item.id, { pdfThumbnail: dataUrl });
+        })
+        .catch((err) => {
+          console.warn('[FlowCard] Não foi possível gerar miniatura PDF:', err);
+        })
+        .finally(() => {
+          if (!isCancelled) setGeneratingThumb(false);
+        });
+
+      return () => {
+        isCancelled = true;
+      };
+    }
+  }, [isPdf, item.id, item.pdfThumbnail, resolvedPdfUrl]);
 
   // Escuta alterações de configurações do Dev-Tools em tempo real
   useEffect(() => {
@@ -508,86 +548,38 @@ export function FlowCard({
               </div>
             )}
 
-            {/* Leitor de PDF Leve com iframe e navegação por setas (Requisito 4) */}
-            {isPdf && (
-              <div className="overflow-hidden rounded-xl border border-white/10 bg-[#0c0c14] shadow-md">
-                {resolvedPdfUrl ? (
-                  <div className="flex flex-col">
-                    <div className="flex items-center justify-between border-b border-white/10 bg-white/[0.04] px-3.5 py-2">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <FileText size={15} className="text-red-400 shrink-0" />
-                        <span className="text-xs font-semibold text-white/90 truncate">
-                          {item.fileName || 'Documento PDF'}
-                        </span>
-                      </div>
-                      <div className="flex items-center gap-1.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => setPdfPage((p) => Math.max(1, p - 1))}
-                          disabled={pdfPage <= 1}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white disabled:opacity-30 disabled:hover:bg-white/5 cursor-pointer"
-                          title="Página anterior"
-                          aria-label="Página anterior"
-                        >
-                          <ChevronLeft size={16} />
-                        </button>
-                        <span className="min-w-14 text-center font-mono text-xs text-white/80">
-                          Pág. {pdfPage}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setPdfPage((p) => p + 1)}
-                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-white/70 transition hover:bg-white/10 hover:text-white cursor-pointer"
-                          title="Próxima página"
-                          aria-label="Próxima página"
-                        >
-                          <ChevronRight size={16} />
-                        </button>
-                      </div>
-                    </div>
-                    <div className="relative w-full h-80 bg-neutral-900 overflow-hidden">
-                      <iframe
-                        key={`pdf-${item.id}-p${pdfPage}`}
-                        src={`${resolvedPdfUrl}#page=${pdfPage}&view=FitH`}
-                        className="w-full h-full border-0 bg-white"
-                        title={item.fileName || 'Leitor de PDF'}
-                      />
-                    </div>
-                  </div>
-                ) : (
-                  <div className="flex h-32 flex-col items-center justify-center gap-2 p-4 text-center text-xs text-white/40">
-                    <FileText size={24} className="text-red-400" />
-                    <span>Leitor de PDF pronto</span>
-                    <span className="text-[11px] text-white/30">
-                      Clique em Baixar abaixo para ler o documento no app
-                    </span>
-                  </div>
-                )}
-              </div>
+            {/* Visualizador de PDF com PDF.js e Canvas (Oculto por padrão, aberto ao clicar em Visualizar) */}
+            {isPdf && showPdfViewer && resolvedPdfUrl && (
+              <PdfViewer
+                url={resolvedPdfUrl}
+                fileName={item.fileName}
+                onClose={() => setShowPdfViewer(false)}
+              />
             )}
 
             <div className="flex items-center justify-between gap-3 rounded-xl border border-white/5 bg-white/[0.02] p-3.5 transition hover:bg-white/[0.04]">
               <div className="flex items-center gap-3 min-w-0 flex-1 overflow-hidden">
                 <div
-                  className="relative flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xs font-bold text-white shadow-lg overflow-hidden border border-white/10"
+                  className="relative flex w-[105px] h-[150px] shrink-0 items-center justify-center rounded-none text-xs font-bold text-white shadow-lg overflow-hidden border border-white/10"
                   style={{ backgroundColor: isPdf ? '#e74c3c' : fileCategory?.color || '#a29bfe' }}
                 >
                   {isVideo ? (
                     <Film size={18} />
                   ) : isPdf ? (
-                    resolvedPdfUrl ? (
-                      <div className="relative h-full w-full bg-white overflow-hidden pointer-events-none select-none">
-                        <iframe
-                          src={`${resolvedPdfUrl}#page=1&toolbar=0&navpanes=0&scrollbar=0&view=Fit`}
-                          className="pointer-events-none select-none absolute top-0 left-0 w-[240px] h-[240px] origin-top-left scale-[0.183] border-0 bg-white"
-                          tabIndex={-1}
-                          scrolling="no"
-                          title="Miniatura PDF"
-                        />
+                    pdfThumbnailImg ? (
+                      <img
+                        src={pdfThumbnailImg}
+                        alt="Miniatura PDF"
+                        className="h-full w-full object-cover select-none pointer-events-none bg-white"
+                      />
+                    ) : generatingThumb ? (
+                      <div className="flex h-full w-full items-center justify-center bg-red-950/40">
+                        <PendulumLoader size={12} color="#ffffff" />
                       </div>
                     ) : (
-                      <div className="flex h-full w-full items-center justify-center bg-red-600 text-[10px] font-bold text-white">
-                        PDF
+                      <div className="flex flex-col h-full w-full items-center justify-center bg-gradient-to-br from-red-600 to-rose-700 text-[10px] font-bold text-white">
+                        <FileText size={18} className="mb-0.5 opacity-90" />
+                        <span>PDF</span>
                       </div>
                     )
                   ) : (
@@ -654,6 +646,23 @@ export function FlowCard({
                   >
                     <FolderOpen size={14} className="text-[#00e5ff]" />
                     <span className="hidden sm:inline">Abrir Pasta</span>
+                  </button>
+                )}
+
+                {/* Botão Visualizar PDF ao lado de Abrir Pasta */}
+                {isPdf && resolvedPdfUrl && !downloadProgress?.isDownloading && (
+                  <button
+                    onClick={() => setShowPdfViewer((v) => !v)}
+                    className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-medium transition ${
+                      showPdfViewer
+                        ? 'border-[#00e5ff]/50 bg-[#00e5ff]/20 text-[#00e5ff]'
+                        : 'border-white/10 bg-white/5 text-white/80 hover:bg-white/15 hover:text-white'
+                    }`}
+                    title={showPdfViewer ? 'Ocultar leitor de PDF' : 'Visualizar documento PDF'}
+                  >
+                    <Eye size={14} className="text-[#00e5ff]" />
+                    <span className="hidden sm:inline">{showPdfViewer ? 'Ocultar' : 'Visualizar'}</span>
+                    <span className="sm:hidden">{showPdfViewer ? 'Fechar' : 'Visualizar'}</span>
                   </button>
                 )}
               </div>

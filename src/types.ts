@@ -28,6 +28,7 @@ export interface FlowItem {
   fileType?: string;
   fileUrl?: string;
   videoData?: string;
+  pdfThumbnail?: string;
   transferSpeed?: string;
   isLoadingPreview?: boolean;
   logs?: FlowLogEntry[];

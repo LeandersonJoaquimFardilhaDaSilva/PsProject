@@ -9,6 +9,7 @@ import { Composer } from '@/components/Composer';
 import { SyncModal } from '@/components/SyncModal';
 import { SettingsModal } from '@/components/SettingsModal';
 import { fetchLinkPreview, getDomain } from '@/lib/linkPreview';
+import { generatePdfThumbnail, isPdfFile } from '@/lib/pdfHelper';
 import {
   reconcileSyncData,
   loadSyncConfig,
@@ -621,6 +622,16 @@ export function App() {
     // Push instantâneo via WebSocket
     broadcastDirectEvent('new_flow_item', item);
     broadcastDataChange();
+
+    if (isPdfFile(file.name, ext)) {
+      generatePdfThumbnail(file, item.id)
+        .then((thumb) => {
+          handleUpdateFlowPreview(item.id, { pdfThumbnail: thumb });
+        })
+        .catch((err) => {
+          console.warn('[App] Erro ao gerar thumbnail para PDF enviado:', err);
+        });
+    }
   }
 
   // Download Sob Demanda (Foto ou Arquivo) com barra de progresso em tempo real
@@ -969,6 +980,7 @@ export function App() {
                     onDelete={handleDeleteFlow}
                     onTogglePin={store.togglePin}
                     onUpdateImage={store.updateFlowImage}
+                    onUpdateFlowPreview={handleUpdateFlowPreview}
                     onDownloadItem={handleDownloadItem}
                     downloadProgress={downloadProgressMap[item.id]}
                   />

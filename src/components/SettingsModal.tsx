@@ -731,11 +731,13 @@ export function SettingsModal({
                 >
                   {networkTest?.isAutoPing ? (
                     <>
-                      <Pause size={14} /> Pausar Ping-Pong Contínuo
+                      <PendulumLoader size={12} color="#ffffff" />
+                      <span>Pausar Ping-Pong Contínuo</span>
                     </>
                   ) : (
                     <>
-                      <Play size={14} /> Iniciar Ping-Pong Contínuo
+                      <Play size={14} />
+                      <span>Iniciar Ping-Pong Contínuo</span>
                     </>
                   )}
                 </button>
