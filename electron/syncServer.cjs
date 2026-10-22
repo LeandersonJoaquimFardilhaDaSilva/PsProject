@@ -30,6 +30,38 @@ function sanitizeName(name) {
   return name.replace(/[<>:"/\\|?*\x00-\x1F]/g, '_').trim() || 'geral';
 }
 
+function isLoopbackAddress(addr) {
+  if (!addr) return false;
+  return (
+    addr === '127.0.0.1' ||
+    addr === '::1' ||
+    addr === '::ffff:127.0.0.1' ||
+    addr.startsWith('127.') ||
+    addr === 'localhost'
+  );
+}
+
+function isLocalExtension(req) {
+  const remote = req.socket.remoteAddress || '';
+  if (!isLoopbackAddress(remote)) return false;
+  const clientHeader = (req.headers['x-flow-client'] || req.headers['x-tove-client'] || '').toLowerCase();
+  const origin = req.headers['origin'] || '';
+  const isExtensionOrigin =
+    origin.startsWith('chrome-extension://') ||
+    origin.startsWith('edge-extension://') ||
+    origin.startsWith('moz-extension://');
+  return clientHeader === 'extension' || clientHeader === 'tove-extension' || isExtensionOrigin;
+}
+
+function isAuthorizedExtension(req, serverToken) {
+  if (isLocalExtension(req)) return true;
+  const reqToken =
+    req.headers['x-sync-token'] ||
+    req.headers['authorization']?.replace(/^Bearer\s+/i, '') ||
+    new URL(req.url, 'http://localhost').searchParams.get('token');
+  return Boolean(reqToken && reqToken === serverToken);
+}
+
 function getMimeType(filePath) {
   const ext = path.extname(filePath).toLowerCase();
   const map = {
@@ -116,6 +148,8 @@ function startSyncServer(options = {}) {
   const onSyncRequest =
     options.onSyncRequest ||
     (async () => ({ channels: [], flows: [], deletedChannelIds: [], deletedFlowIds: [] }));
+  const onGetData = options.onGetData || (async () => ({ channels: [], flows: [] }));
+  const onAddLink = options.onAddLink || (async (link) => link);
   const onClientConnected = options.onClientConnected || (() => {});
   const onWsClientCountChange = options.onWsClientCountChange || (() => {});
   const onClientActivity = options.onClientActivity || (() => {});
@@ -132,7 +166,7 @@ function startSyncServer(options = {}) {
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD');
     res.setHeader(
       'Access-Control-Allow-Headers',
-      'Content-Type, Authorization, X-Sync-Token, X-Channel-Name, X-File-Name, X-File-Id, X-File-Type, Range'
+      'Content-Type, Authorization, X-Sync-Token, X-Channel-Name, X-File-Name, X-File-Id, X-File-Type, X-Flow-Client, X-Tove-Client, Range'
     );
     res.setHeader(
       'Access-Control-Expose-Headers',
@@ -147,15 +181,123 @@ function startSyncServer(options = {}) {
 
     const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
 
+    // 0. Endpoints da Extensão do Navegador (Chrome/Edge/Brave) & API
+    if ((url.pathname === '/api/data' || url.pathname === '/data') && req.method === 'GET') {
+      if (!isAuthorizedExtension(req, token)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Não autorizado. Conecte pelo mesmo computador ou utilize o token de sincronização.' }));
+        return;
+      }
+
+      try {
+        const storeData = await onGetData();
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            status: 'ok',
+            channels: storeData.channels || [],
+            flows: storeData.flows || [],
+          })
+        );
+      } catch (err) {
+        console.error('[SyncServer] Erro ao obter dados para a extensão:', err);
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message || 'Erro ao carregar dados' }));
+      }
+      return;
+    }
+
+    if ((url.pathname === '/api/links' || url.pathname === '/links') && req.method === 'POST') {
+      if (!isAuthorizedExtension(req, token)) {
+        res.writeHead(401, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'Não autorizado.' }));
+        return;
+      }
+
+      let bodyData = '';
+      req.on('data', (chunk) => {
+        bodyData += chunk;
+        if (bodyData.length > 10 * 1024 * 1024) {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Payload de link muito grande' }));
+          req.destroy();
+        }
+      });
+
+      req.on('end', async () => {
+        try {
+          const payload = JSON.parse(bodyData || '{}');
+          if (!payload.url && !payload.text) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'URL ou texto não fornecido' }));
+            return;
+          }
+
+          const createdItem = await onAddLink(payload);
+          res.writeHead(201, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok', item: createdItem }));
+        } catch (err) {
+          console.error('[SyncServer] Erro ao processar link da extensão:', err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Erro ao processar link' }));
+        }
+      });
+      return;
+    }
+
+    if ((url.pathname === '/api/pairing-qr' || url.pathname === '/pairing-qr') && req.method === 'GET') {
+      const qrData = {
+        protocol: 'flow-sync',
+        version: 2,
+        url: `http://${getLocalIps()[0]}:${port}`,
+        wsUrl: `ws://${getLocalIps()[0]}:${port}/ws`,
+        token,
+        deviceName: 'Tove Desktop',
+      };
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(
+        JSON.stringify({
+          status: 'ok',
+          payload: JSON.stringify(qrData),
+          qrData,
+          token,
+          server: `http://${getLocalIps()[0]}:${port}/api`,
+        })
+      );
+      return;
+    }
+
+    if ((url.pathname === '/api/pair' || url.pathname === '/pair') && req.method === 'POST') {
+      let bodyData = '';
+      req.on('data', (chunk) => { bodyData += chunk; });
+      req.on('end', async () => {
+        try {
+          const payload = JSON.parse(bodyData || '{}');
+          const clientToken = payload.invitation || payload.token || '';
+          if (clientToken && clientToken !== token) {
+            res.writeHead(401, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Token inválido' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ status: 'ok', token }));
+        } catch (err) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err.message || 'Erro ao parear' }));
+        }
+      });
+      return;
+    }
+
     // 1. Status Check
-    if (url.pathname === '/api/status' && req.method === 'GET') {
+    if ((url.pathname === '/api/status' || url.pathname === '/status') && req.method === 'GET') {
       const ips = getLocalIps();
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
         JSON.stringify({
           status: 'ok',
-          device: 'Flow Desktop',
-          version: '0.3.1',
+          device: 'Tove Desktop',
+          version: '1.1.0',
           websocketUrl: `ws://${ips[0]}:${port}/ws`,
           ip: ips[0],
           port,
@@ -598,7 +740,7 @@ function startSyncServer(options = {}) {
           url: `http://${ips[0]}:${activePort}`,
           wsUrl: `ws://${ips[0]}:${activePort}/ws`,
           token,
-          deviceName: 'Flow Desktop',
+          deviceName: 'Tove Desktop',
         }),
         regenerateToken: () => {
           token = crypto.randomBytes(8).toString('hex');

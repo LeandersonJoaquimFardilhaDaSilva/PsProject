@@ -1,7 +1,7 @@
 {
   "name": "tove-desktop",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Tove — Transfer, Organize, Visualize, Everywhere",
   "author": "Tove Team",
   "main": "electron/main.cjs",

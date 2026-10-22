@@ -31,14 +31,18 @@ export interface FlowItem {
   pdfThumbnail?: string;
   transferSpeed?: string;
   isLoadingPreview?: boolean;
+  isPortrait?: boolean;
   logs?: FlowLogEntry[];
 }
 
-export interface Channel {
+export interface Folder {
   id: string;
   name: string;
   createdAt: number;
   color: string;
+  isPrivate?: boolean;
 }
+
+export type Channel = Folder;
 
 export type FlowFilter = 'all' | 'link' | 'text' | 'image' | 'file';

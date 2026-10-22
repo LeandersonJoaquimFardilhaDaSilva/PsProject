@@ -222,7 +222,23 @@ ipcMain.handle('open-file-external', async (_, filePath) => {
   return false;
 });
 
+let storeCache = {
+  channels: [],
+  flows: [],
+};
+
+ipcMain.on('update-store-cache', (_, data) => {
+  if (data) {
+    if (Array.isArray(data.channels)) storeCache.channels = data.channels;
+    if (Array.isArray(data.flows)) storeCache.flows = data.flows;
+  }
+});
+
 ipcMain.handle('broadcast-sync-push', (_, data) => {
+  if (data?.data?.channels) {
+    storeCache.channels = data.data.channels;
+    storeCache.flows = data.data.flows || [];
+  }
   if (syncServerInstance?.broadcast) {
     syncServerInstance.broadcast(data);
     return true;
@@ -326,6 +342,57 @@ app.whenReady().then(async () => {
             flows: payload.flows || [],
             deletedChannelIds: payload.deletedChannelIds || [],
             deletedFlowIds: payload.deletedFlowIds || [],
+          });
+        });
+      },
+      onGetData: async () => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          return storeCache;
+        }
+        return new Promise((resolve) => {
+          const reqId = Math.random().toString(36).slice(2);
+          const timer = setTimeout(() => {
+            ipcMain.removeHandler(`get-extension-data-response-${reqId}`);
+            resolve(storeCache);
+          }, 2500);
+
+          ipcMain.handleOnce(`get-extension-data-response-${reqId}`, (_event, res) => {
+            clearTimeout(timer);
+            if (res && Array.isArray(res.channels)) {
+              storeCache.channels = res.channels;
+              storeCache.flows = res.flows || [];
+              resolve(res);
+            } else {
+              resolve(storeCache);
+            }
+          });
+
+          mainWindow.webContents.send('extension-get-data', { reqId });
+        });
+      },
+      onAddLink: async (linkData) => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          throw new Error('Janela do Tove não está aberta no momento');
+        }
+        return new Promise((resolve, reject) => {
+          const linkId = Math.random().toString(36).slice(2);
+          const timer = setTimeout(() => {
+            ipcMain.removeHandler(`extension-add-link-response-${linkId}`);
+            reject(new Error('Tempo limite para adicionar link no desktop esgotado'));
+          }, 6000);
+
+          ipcMain.handleOnce(`extension-add-link-response-${linkId}`, (_event, result) => {
+            clearTimeout(timer);
+            if (result?.error) {
+              reject(new Error(result.error));
+            } else {
+              resolve(result);
+            }
+          });
+
+          mainWindow.webContents.send('extension-add-link', {
+            linkId,
+            link: linkData,
           });
         });
       },

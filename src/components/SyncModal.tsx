@@ -206,7 +206,7 @@ export function SyncModal({
 
       onSyncComplete(merged);
       setSyncStatusMsg({
-        text: `Sincronização concluída! ${merged.flows.length} itens e ${merged.channels.length} canais ativos.`,
+        text: `Sincronização concluída! ${merged.flows.length} itens e ${merged.channels.length} pastas ativas.`,
         type: 'success',
       });
     } catch (err: any) {
@@ -238,7 +238,7 @@ export function SyncModal({
             </div>
             <div>
               <h2 className="text-base font-semibold text-white">Sincronização PC ↔ Celular</h2>
-              <p className="text-xs text-white/40">Sincronize seus canais e mensagens em duas vias</p>
+              <p className="text-xs text-white/40">Sincronize suas pastas e mensagens em duas vias</p>
             </div>
           </div>
 

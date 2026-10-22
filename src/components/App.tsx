@@ -1,5 +1,5 @@
 import { useMemo, useState, useEffect, useRef, useCallback } from 'react';
-import { Sparkles, AlertCircle } from 'lucide-react';
+import { Sparkles, AlertCircle, FolderPlus, X, Lock } from 'lucide-react';
 import { useFlowStore } from '@/hooks/useFlowStore';
 import { useNetworkTest } from '@/hooks/useNetworkTest';
 import { Sidebar } from '@/components/Sidebar';
@@ -39,6 +39,18 @@ export function App() {
   const [search, setSearch] = useState('');
   const [creatingChannel, setCreatingChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
+  const [isPrivateNewChannel, setIsPrivateNewChannel] = useState(false);
+  const [showPrivate, setShowPrivate] = useState(false);
+  const createFolderInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (creatingChannel) {
+      const timer = setTimeout(() => {
+        createFolderInputRef.current?.focus();
+      }, 50);
+      return () => clearTimeout(timer);
+    }
+  }, [creatingChannel]);
   const [isSyncModalOpen, setIsSyncModalOpen] = useState(false);
   const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
   const [isSidebarOpenMobile, setIsSidebarOpenMobile] = useState(false);
@@ -330,6 +342,76 @@ export function App() {
       }
     });
 
+    // 1b. Integração com a Extensão do Navegador (Chrome/Edge/Brave)
+    const cleanupExtGetData = window.electronAPI.onExtensionGetData?.((data) => {
+      window.electronAPI?.sendExtensionDataResponse?.(data.reqId, {
+        channels: storeRef.current.channels,
+        flows: storeRef.current.flows,
+      });
+    });
+
+    const cleanupExtAddLink = window.electronAPI.onExtensionAddLink?.(async ({ linkId, link }) => {
+      try {
+        const targetChannel =
+          storeRef.current.channels.find((c) => c.id === link.channelId) ||
+          activeChannel ||
+          storeRef.current.channels[0];
+
+        if (!targetChannel) {
+          throw new Error('Nenhuma pasta disponível no Tove');
+        }
+
+        const isActualUrl = link.url && /^https?:\/\//i.test(link.url);
+        const item = storeRef.current.addFlow({
+          type: isActualUrl ? 'link' : 'text',
+          channelId: targetChannel.id,
+          url: isActualUrl ? link.url : undefined,
+          text: link.text || (!isActualUrl ? link.url : undefined),
+          title: link.title || link.url || 'Link sem título',
+          description: link.description || '',
+          image: link.image || '',
+          siteName: link.siteName || '',
+          isLoadingPreview: Boolean(isActualUrl && !link.image),
+          logs: [
+            {
+              timestamp: Date.now(),
+              level: 'info',
+              message: `Recebido da extensão do navegador: ${link.title || link.url || 'Item'}`,
+            },
+          ],
+        });
+
+        broadcastDirectEvent('new_flow_item', item);
+        broadcastDataChange();
+
+        // Se o link não tiver thumbnail da extensão, busca metadados em segundo plano
+        if (isActualUrl && !link.image) {
+          fetchLinkPreview(link.url)
+            .then((preview) => {
+              if (preview && (preview.image || preview.description || preview.title)) {
+                handleUpdateFlowPreview(item.id, {
+                  title: preview.title || item.title,
+                  description: preview.description || item.description,
+                  image: preview.image || item.image,
+                  siteName: preview.siteName || item.siteName,
+                  isLoadingPreview: false,
+                });
+              } else {
+                handleUpdateFlowPreview(item.id, { isLoadingPreview: false });
+              }
+            })
+            .catch(() => {
+              handleUpdateFlowPreview(item.id, { isLoadingPreview: false });
+            });
+        }
+
+        await window.electronAPI?.sendExtensionLinkResponse?.(linkId, item);
+      } catch (err: any) {
+        console.error('[App] Erro ao processar link da extensão:', err);
+        await window.electronAPI?.sendExtensionLinkResponse?.(linkId, { error: err.message || 'Falha ao processar link' });
+      }
+    });
+
     return () => {
       cleanup();
       cleanupClient?.();
@@ -340,8 +422,20 @@ export function App() {
       cleanupPing?.();
       cleanupPong?.();
       cleanupDirect?.();
+      cleanupExtGetData?.();
+      cleanupExtAddLink?.();
     };
   }, []);
+
+  // Manter cache do processo principal sempre atualizado para a extensão
+  useEffect(() => {
+    if (isElectron && window.electronAPI?.updateStoreCache) {
+      window.electronAPI.updateStoreCache({
+        channels: store.channels,
+        flows: store.flows,
+      });
+    }
+  }, [store.channels, store.flows, isElectron]);
 
   // Escuta atualizações de configuração de sincronização para reconectar imediatamente
   useEffect(() => {
@@ -548,7 +642,7 @@ export function App() {
     return [...items].sort((a, b) => a.createdAt - b.createdAt);
   }, [activeChannel, store.flows, filter, search]);
 
-  // Rola para o final ao trocar de canal
+  // Rola para o final ao trocar de pasta
   useEffect(() => {
     scrollToBottom(false);
   }, [store.activeChannelId, scrollToBottom]);
@@ -561,17 +655,44 @@ export function App() {
   function handleCreateChannel() {
     setCreatingChannel(true);
     setNewChannelName('');
+    setIsPrivateNewChannel(false);
+    setIsSidebarOpenMobile(false);
   }
 
   function confirmCreateChannel() {
     const name = newChannelName.trim();
     if (name) {
-      store.createChannel(name);
+      const isPriv = isPrivateNewChannel;
+      store.createChannel(name, isPriv);
+      if (isPriv) {
+        setShowPrivate(true);
+      }
       setTimeout(() => broadcastDataChange(), 50);
     }
     setCreatingChannel(false);
     setNewChannelName('');
+    setIsPrivateNewChannel(false);
   }
+
+  function handleToggleShowPrivate() {
+    setShowPrivate((prev) => {
+      const next = !prev;
+      if (!next && activeChannel?.isPrivate) {
+        const firstPublic = store.channels.find((c) => !c.isPrivate);
+        store.setActiveChannelId(firstPublic ? firstPublic.id : null);
+      } else if (next && !store.activeChannelId && store.channels.length > 0) {
+        store.setActiveChannelId(store.channels[0].id);
+      }
+      return next;
+    });
+  }
+
+  useEffect(() => {
+    if (!showPrivate && activeChannel?.isPrivate) {
+      const firstPublic = store.channels.find((c) => !c.isPrivate);
+      store.setActiveChannelId(firstPublic ? firstPublic.id : null);
+    }
+  }, [showPrivate, activeChannel, store]);
 
   // Envio de Arquivo Binário (PDF, EXE, DOC, etc.) — Sem duplicação no remetente
   async function handleSendFile(file: File) {
@@ -925,12 +1046,136 @@ export function App() {
         activeClientsCount={isElectron ? activeWsClientsCount : undefined}
       />
 
+      {/* Modal / Popup Criar Nova Pasta (Centralizado, sobre a aplicação com blur suave) */}
+      {creatingChannel && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]"
+          onClick={() => setCreatingChannel(false)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-create-folder-title"
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#16161e] p-5 shadow-2xl animate-[flowIn_0.15s_ease-out]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff] text-white shadow-md">
+                  <FolderPlus size={18} />
+                </div>
+                <div>
+                  <h3 id="modal-create-folder-title" className="text-base font-semibold text-white">
+                    Nova Pasta
+                  </h3>
+                  <p className="text-xs text-white/50">Organize seus envios e arquivos</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreatingChannel(false)}
+                className="rounded-lg p-1.5 text-white/40 hover:bg-white/10 hover:text-white transition"
+                title="Fechar"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className="mt-4">
+              <input
+                ref={createFolderInputRef}
+                autoFocus
+                value={newChannelName}
+                onChange={(e) => setNewChannelName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') confirmCreateChannel();
+                  if (e.key === 'Escape') setCreatingChannel(false);
+                }}
+                placeholder="Nome da pasta (ex: Estudos)"
+                className="w-full rounded-xl border border-white/10 bg-white/5 px-3.5 py-2.5 text-sm text-white placeholder-white/30 outline-none transition focus:border-[#ff3e6c]/50 focus:bg-white/10"
+              />
+            </div>
+
+            {/* Opções de Privacidade / Tipo de Pasta (Botões tipo Radio) */}
+            <fieldset className="mt-4">
+              <legend className="mb-2 text-xs font-medium text-white/50">Tipo de Pasta</legend>
+              <div className="grid grid-cols-2 gap-2">
+                <label
+                  className={`flex cursor-pointer items-center gap-2.5 rounded-xl border p-2.5 transition select-none ${
+                    !isPrivateNewChannel
+                      ? 'border-[#00e5ff]/50 bg-[#00e5ff]/10 text-white'
+                      : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="folderPrivacy"
+                    value="public"
+                    checked={!isPrivateNewChannel}
+                    onChange={() => setIsPrivateNewChannel(false)}
+                    className="accent-[#00e5ff] h-4 w-4 cursor-pointer"
+                  />
+                  <div className="flex flex-col min-w-0">
+                    <span className="text-xs font-medium truncate">Pública</span>
+                    <span className="text-[10px] text-white/40 truncate">Visível por padrão</span>
+                  </div>
+                </label>
+
+                <label
+                  className={`flex cursor-pointer items-center gap-2.5 rounded-xl border p-2.5 transition select-none ${
+                    isPrivateNewChannel
+                      ? 'border-[#ff3e6c]/50 bg-[#ff3e6c]/10 text-white'
+                      : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white/80'
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="folderPrivacy"
+                    value="private"
+                    checked={isPrivateNewChannel}
+                    onChange={() => setIsPrivateNewChannel(true)}
+                    className="accent-[#ff3e6c] h-4 w-4 cursor-pointer"
+                  />
+                  <div className="flex flex-col min-w-0">
+                    <div className="flex items-center gap-1">
+                      <span className="text-xs font-medium truncate">Privada</span>
+                      <Lock size={10} className="text-[#ff3e6c] shrink-0" />
+                    </div>
+                    <span className="text-[10px] text-white/40 truncate">Oculta por padrão</span>
+                  </div>
+                </label>
+              </div>
+            </fieldset>
+
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setCreatingChannel(false)}
+                className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/70 hover:bg-white/10 hover:text-white transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={confirmCreateChannel}
+                disabled={!newChannelName.trim()}
+                className="rounded-xl bg-gradient-to-r from-[#ff3e6c] to-[#00e5ff] px-4 py-2 text-xs font-semibold text-white shadow-lg transition hover:opacity-90 disabled:opacity-40"
+              >
+                Criar pasta
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex flex-1 overflow-hidden w-full max-w-[100vw] min-w-0">
         <Sidebar
           channels={store.channels}
           activeChannelId={store.activeChannelId}
           flowsCount={flowsCount}
           filter={filter}
+          showPrivate={showPrivate}
+          onToggleShowPrivate={handleToggleShowPrivate}
           onSelectChannel={store.setActiveChannelId}
           onCreateChannel={handleCreateChannel}
           onRenameChannel={store.renameChannel}
@@ -941,35 +1186,13 @@ export function App() {
         />
 
         <main className="flex flex-1 flex-col min-w-0 max-w-full overflow-x-hidden">
-          {creatingChannel && (
-            <div className="border-b border-white/5 bg-[#0d0d12] px-4 py-3">
-              <input
-                autoFocus
-                value={newChannelName}
-                onChange={(e) => setNewChannelName(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') confirmCreateChannel();
-                  if (e.key === 'Escape') setCreatingChannel(false);
-                }}
-                placeholder="Nome do canal (ex: Estudos)"
-                className="w-64 rounded-lg border border-[#ff3e6c]/40 bg-white/5 px-3 py-2 text-sm text-white placeholder-white/30 outline-none"
-              />
-              <button
-                onClick={confirmCreateChannel}
-                className="ml-2 rounded-lg bg-[#ff3e6c] px-3 py-2 text-sm font-medium text-white"
-              >
-                Criar
-              </button>
-            </div>
-          )}
-
           <div
             ref={messagesContainerRef}
             className="flex-1 overflow-y-auto overflow-x-hidden px-4 sm:px-6 py-6 w-full max-w-full min-w-0"
           >
             {!activeChannel && <EmptyState onCreate={handleCreateChannel} />}
             {activeChannel && visibleFlows.length === 0 && (
-              <ChannelEmpty channelName={activeChannel.name} />
+              <FolderEmpty folderName={activeChannel.name} />
             )}
             {activeChannel && visibleFlows.length > 0 && (
               <div className="mx-auto w-full max-w-2xl space-y-3 min-w-0">
@@ -1014,26 +1237,26 @@ function EmptyState({ onCreate }: { onCreate: () => void }) {
       </div>
       <h2 className="mb-2 text-xl font-bold text-white">Bem-vindo ao Tove</h2>
       <p className="mb-6 max-w-sm text-sm text-white/50">
-        Crie canais para organizar seus links, arquivos, textos e imagens por assunto. Tudo fica salvo
+        Crie pastas para organizar seus links, arquivos, textos e imagens por assunto. Tudo fica salvo
         localmente neste dispositivo.
       </p>
       <button
         onClick={onCreate}
         className="rounded-xl bg-gradient-to-r from-[#ff3e6c] to-[#00e5ff] px-6 py-2.5 text-sm font-semibold text-white transition hover:opacity-90"
       >
-        Criar primeiro canal
+        Criar primeira pasta
       </button>
     </div>
   );
 }
 
-function ChannelEmpty({ channelName }: { channelName: string }) {
+function FolderEmpty({ folderName }: { folderName: string }) {
   return (
     <div className="flex h-full flex-col items-center justify-center text-center">
       <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/10 bg-white/5">
         <Sparkles size={24} className="text-white/40" />
       </div>
-      <h3 className="mb-1 text-lg font-semibold text-white">#{channelName} está vazio</h3>
+      <h3 className="mb-1 text-lg font-semibold text-white">{folderName} está vazia</h3>
       <p className="text-sm text-white/40">
         Cole um link, escreva um texto ou envie fotos e arquivos (PDF, EXE, DOC...) abaixo.
       </p>

@@ -94,3 +94,60 @@
   animation: pendulum-swing-right 1.3s infinite;
 }
 
+/* ==========================================================
+   GRID 2X2 PARA CARDS DE LINK COM IMAGEM VERTICAL (ALTURA > LARGURA)
+   Baseado no template2.html:
+   Blocos 1 e 3: Imagem na coluna esquerda ocupando as duas linhas
+   Bloco 2: Cabeçalho na linha superior direita
+   Bloco 4: Conteúdo de texto e link na linha inferior direita
+   ========================================================== */
+.card-portrait-grid {
+  display: grid !important;
+  align-items: stretch;
+  grid-template-columns: 130px 1fr;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "image header"
+    "image footer";
+  gap: 8px 14px;
+}
+
+@media (min-width: 640px) {
+  .card-portrait-grid {
+    grid-template-columns: 170px 1fr;
+    gap: 10px 16px;
+  }
+}
+
+.card-portrait-grid .card-portrait-header {
+  grid-area: header;
+  margin-bottom: 0 !important;
+}
+
+.card-portrait-grid .card-portrait-image {
+  grid-area: image;
+  width: 100%;
+  height: 100%;
+  min-height: 176px;
+  max-height: 250px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: rgba(0, 0, 0, 0.3);
+}
+
+.card-portrait-grid .card-portrait-image img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card-portrait-grid .card-portrait-footer {
+  grid-area: footer;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  height: 100%;
+  min-height: 0;
+}
+

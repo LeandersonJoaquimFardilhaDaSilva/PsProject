@@ -139,3 +139,5 @@ export function ChannelSquaresIcon({
     </div>
   );
 }
+
+export const FolderSquaresIcon = ChannelSquaresIcon;

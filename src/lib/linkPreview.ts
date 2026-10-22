@@ -5,6 +5,7 @@ export interface LinkPreview {
   description?: string;
   image?: string;
   siteName?: string;
+  isPortrait?: boolean;
 }
 
 export type PreviewProviderId =
@@ -506,7 +507,25 @@ export async function fetchLinkPreview(url: string): Promise<LinkPreview> {
     return await tryHeuristic(normalized);
   }
 
-  return mergePreviews(...results);
+  const merged = mergePreviews(...results);
+  if (merged.image && typeof window !== 'undefined' && typeof Image !== 'undefined') {
+    try {
+      const isPortrait = await withTimeout(
+        new Promise<boolean>((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve(img.naturalHeight > img.naturalWidth);
+          img.onerror = () => resolve(false);
+          img.src = merged.image!;
+        }),
+        2500
+      );
+      merged.isPortrait = isPortrait;
+    } catch {
+      // Ignora timeout ou erro de carregamento no probing
+    }
+  }
+
+  return merged;
 }
 
 export function isValidImageUrl(url: string): boolean {

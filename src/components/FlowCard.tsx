@@ -73,6 +73,34 @@ export function FlowCard({
   const [showPdfViewer, setShowPdfViewer] = useState(false);
   const [pdfThumbnailImg, setPdfThumbnailImg] = useState<string | null>(item.pdfThumbnail || null);
   const [generatingThumb, setGeneratingThumb] = useState(false);
+  const [isPortrait, setIsPortrait] = useState<boolean>(() => Boolean(item.isPortrait));
+
+  // Detecção de orientação da imagem (altura > largura) para cards de links
+  useEffect(() => {
+    if (item.type !== 'link' || !item.image) {
+      setIsPortrait(false);
+      return;
+    }
+
+    if (typeof item.isPortrait === 'boolean') {
+      setIsPortrait(item.isPortrait);
+      return;
+    }
+
+    const img = new Image();
+    img.src = item.image;
+    if (img.complete && img.naturalWidth && img.naturalHeight) {
+      const portrait = img.naturalHeight > img.naturalWidth;
+      setIsPortrait(portrait);
+      onUpdateFlowPreview?.(item.id, { isPortrait: portrait });
+    } else {
+      img.onload = () => {
+        const portrait = img.naturalHeight > img.naturalWidth;
+        setIsPortrait(portrait);
+        onUpdateFlowPreview?.(item.id, { isPortrait: portrait });
+      };
+    }
+  }, [item.type, item.image, item.id, item.isPortrait, onUpdateFlowPreview]);
 
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
   const hasErrors = item.logs?.some((l) => l.level === 'error');
@@ -280,18 +308,54 @@ export function FlowCard({
   }
 
   const fileCategory = item.fileName ? getFileCategory(item.fileName) : null;
+  const isPortraitLayout =
+    item.type === 'link' &&
+    isPortrait &&
+    Boolean(item.image) &&
+    !editingImage &&
+    !item.isLoadingPreview;
 
   return (
     <>
-      <div className="group relative w-full max-w-full overflow-hidden animate-[flowIn_0.4s_ease-out] rounded-2xl border border-white/10 bg-[#16161e] p-3.5 sm:p-4 transition hover:border-white/20 hover:bg-[#1a1a24]">
+      <div
+        className={`group relative w-full max-w-full overflow-hidden animate-[flowIn_0.4s_ease-out] rounded-2xl border border-white/10 bg-[#16161e] p-3.5 sm:p-4 transition hover:border-white/20 hover:bg-[#1a1a24] ${
+          isPortraitLayout ? 'card-portrait-grid' : ''
+        }`}
+      >
         {item.pinned && (
           <div className="absolute -left-1 top-4 h-8 w-1 rounded-full bg-gradient-to-b from-[#ff3e6c] to-[#00e5ff]" />
         )}
 
-        {/* Top Header do Card */}
-        <div className="mb-2.5 flex items-center gap-2">
+        {/* Bloco 1 e 3 (quando em Grid 2x2): Imagem vertical no lado esquerdo ocupando as 2 linhas */}
+        {isPortraitLayout && (
+          <div className="card-portrait-image relative overflow-hidden rounded-xl bg-black/20 self-stretch min-h-[176px]">
+            <img
+              src={item.image}
+              alt={item.title || 'Preview'}
+              className="h-full w-full object-cover transition duration-200 group-hover:scale-[1.02]"
+              loading="lazy"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                if (img.naturalHeight <= img.naturalWidth) {
+                  setIsPortrait(false);
+                  onUpdateFlowPreview?.(item.id, { isPortrait: false });
+                } else if (!item.isPortrait) {
+                  setIsPortrait(true);
+                  onUpdateFlowPreview?.(item.id, { isPortrait: true });
+                }
+              }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).style.display = 'none';
+                setIsPortrait(false);
+              }}
+            />
+          </div>
+        )}
+
+        {/* Bloco 2: Top Header do Card (linha superior direita quando 2x2, ou topo total quando padrão) */}
+        <div className={`flex items-center gap-2 ${isPortraitLayout ? 'card-portrait-header min-w-0' : 'mb-2.5'}`}>
           <TypeBadge type={isVideo ? 'video' : isPdf ? 'pdf' : item.type} />
-          <span className="text-xs text-white/30">{timeAgo(item.createdAt)}</span>
+          <span className="text-xs text-white/30 shrink-0">{timeAgo(item.createdAt)}</span>
           {item.siteName && (
             <span className="truncate text-xs text-white/40">· {item.siteName}</span>
           )}
@@ -306,7 +370,7 @@ export function FlowCard({
             </span>
           )}
 
-          <div className="ml-auto flex items-center gap-1 opacity-90 sm:opacity-80 sm:group-hover:opacity-100 transition">
+          <div className="ml-auto flex items-center gap-1 opacity-90 sm:opacity-80 sm:group-hover:opacity-100 transition shrink-0">
             {/* Botão de Logs / Diagnóstico — Visível somente se ativado no Dev-Tools */}
             {devTools.enableMessageLogs && item.logs && item.logs.length > 0 && (
               <button
@@ -390,21 +454,56 @@ export function FlowCard({
           </div>
         </div>
 
-        {/* 1. Card de Link — Texto Selecionável */}
-        {item.type === 'link' && item.isLoadingPreview && (
+        {/* Bloco 4 (quando em Grid 2x2 para imagens verticais): Título, descrição e link na parte inferior direita */}
+        {isPortraitLayout && (
+          <div className="card-portrait-footer flex flex-col justify-between h-full min-h-0 pt-0.5">
+            <div>
+              <h3 className="mb-1 font-semibold text-white select-text cursor-text leading-snug line-clamp-2">
+                {item.title}
+              </h3>
+              {item.description && (
+                <p className="mb-2 text-xs leading-relaxed text-white/50 line-clamp-2 sm:line-clamp-3 select-text cursor-text">
+                  {item.description}
+                </p>
+              )}
+            </div>
+            <div className="flex items-center gap-1.5 mt-auto pt-2">
+              <a
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                onClick={(e) => handleOpenExternalLink(e, item.url || '')}
+                className="inline-flex items-center gap-1 text-xs text-[#00e5ff]/80 hover:text-[#00e5ff] hover:underline transition select-text"
+              >
+                <ExternalLink size={12} className="shrink-0" />
+                <span className="truncate max-w-xs">{getDomain(item.url || '')}</span>
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* 1. Card de Link Padrão (Paisagem ou sem imagem) — Texto Selecionável */}
+        {item.type === 'link' && !isPortraitLayout && item.isLoadingPreview && (
           <div className="mb-3 flex h-24 items-center justify-center gap-3 rounded-xl border border-[#00e5ff]/20 bg-[#00e5ff]/5 text-xs text-[#00e5ff] animate-pulse">
             <PendulumLoader size={20} color="#00e5ff" />
             <span className="font-medium">Buscando informações do link em segundo plano...</span>
           </div>
         )}
 
-        {item.type === 'link' && !item.isLoadingPreview && item.image && !editingImage && (
+        {item.type === 'link' && !isPortraitLayout && !item.isLoadingPreview && item.image && !editingImage && (
           <div className="mb-3 overflow-hidden rounded-xl">
             <img
               src={item.image}
               alt={item.title}
               className="h-44 w-full object-cover transition group-hover:scale-[1.02]"
               loading="lazy"
+              onLoad={(e) => {
+                const img = e.currentTarget;
+                if (img.naturalHeight > img.naturalWidth) {
+                  setIsPortrait(true);
+                  onUpdateFlowPreview?.(item.id, { isPortrait: true });
+                }
+              }}
               onError={(e) => {
                 (e.target as HTMLImageElement).style.display = 'none';
               }}
@@ -478,7 +577,7 @@ export function FlowCard({
           </div>
         )}
 
-        {item.type === 'link' && (
+        {item.type === 'link' && !isPortraitLayout && (
           <div className="block">
             <h3 className="mb-1 font-semibold text-white select-text cursor-text leading-snug">
               {item.title}
@@ -694,7 +793,7 @@ export function FlowCard({
 
         {/* Painel de Logs de Diagnóstico — Visível somente se Dev-Tools ativar */}
         {devTools.enableMessageLogs && showLogs && item.logs && item.logs.length > 0 && (
-          <div className="mt-3 rounded-xl border border-white/10 bg-[#09090d] p-3 font-mono text-[11px] space-y-2">
+          <div className={`mt-3 rounded-xl border border-white/10 bg-[#09090d] p-3 font-mono text-[11px] space-y-2 ${isPortraitLayout ? 'col-span-full' : ''}`}>
             <div className="flex items-center justify-between border-b border-white/5 pb-1.5">
               <span className="flex items-center gap-1.5 text-white/60 font-semibold">
                 <Terminal size={12} className="text-[#00e5ff]" /> Logs do Item

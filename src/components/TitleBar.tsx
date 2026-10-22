@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Minus, Square, Copy, X, WifiOff, Search, QrCode, Menu, Settings } from 'lucide-react';
+import { Minus, Square, Copy, X, WifiOff, Search, QrCode, Menu, Settings, Lock } from 'lucide-react';
 import { Capacitor } from '@capacitor/core';
 import type { Channel } from '@/types';
 
@@ -70,12 +70,17 @@ export function TitleBar({
           <button
             onClick={onToggleSidebar}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-white/60 hover:bg-white/10 hover:text-white md:hidden shrink-0"
-            title="Abrir canais"
+            title="Abrir pastas"
           >
             <Menu size={16} />
           </button>
         )}
-        <span className="truncate text-xs font-medium text-white/60">
+        <span className="flex items-center gap-1.5 truncate text-xs font-medium text-white/60">
+          {channel?.isPrivate && (
+            <span title="Pasta privada" className="inline-flex items-center shrink-0">
+              <Lock size={12} className="text-[#ff3e6c]" />
+            </span>
+          )}
           Tove {channel && `· ${channel.name}`}
         </span>
       </div>
@@ -146,7 +151,7 @@ export function TitleBar({
           <button
             onClick={onClearChannel}
             className="rounded-lg px-2 py-1 text-xs text-white/40 transition hover:bg-red-500/10 hover:text-red-400"
-            title="Limpar mensagens não fixadas deste canal"
+            title="Limpar mensagens não fixadas desta pasta"
           >
             Limpar
           </button>

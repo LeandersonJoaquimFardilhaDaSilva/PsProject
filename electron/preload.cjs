@@ -104,4 +104,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
       ipcRenderer.removeListener('direct-event-received', subscription);
     };
   },
+  // Extensão do Navegador (Chrome/Edge/Brave)
+  onExtensionGetData: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('extension-get-data', subscription);
+    return () => {
+      ipcRenderer.removeListener('extension-get-data', subscription);
+    };
+  },
+  sendExtensionDataResponse: (reqId, data) => ipcRenderer.invoke(`get-extension-data-response-${reqId}`, data),
+  onExtensionAddLink: (callback) => {
+    const subscription = (_event, data) => callback(data);
+    ipcRenderer.on('extension-add-link', subscription);
+    return () => {
+      ipcRenderer.removeListener('extension-add-link', subscription);
+    };
+  },
+  sendExtensionLinkResponse: (linkId, data) => ipcRenderer.invoke(`extension-add-link-response-${linkId}`, data),
+  updateStoreCache: (data) => ipcRenderer.send('update-store-cache', data),
 });

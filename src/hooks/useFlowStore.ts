@@ -41,25 +41,35 @@ export function useFlowStore() {
 
   useEffect(() => {
     if (channels.length > 0 && (activeChannelId === null || !channels.find((c) => c.id === activeChannelId))) {
-      setActiveChannelId(channels[0].id);
+      const defaultChannel = channels.find((c) => !c.isPrivate) || channels[0];
+      setActiveChannelId(defaultChannel.id);
     }
     if (channels.length === 0) {
       setActiveChannelId(null);
     }
   }, [channels, activeChannelId]);
 
-  const createChannel = useCallback((name: string) => {
+  const createChannel = useCallback((name: string, isPrivate = false) => {
     const channel: Channel = {
       id: uid(),
-      name: name.trim() || 'Novo Canal',
+      name: name.trim() || 'Nova Pasta',
       createdAt: Date.now(),
       color: pickColor(memoryRef.current.channels.length),
+      isPrivate: Boolean(isPrivate),
     };
     memoryRef.current.channels = [...memoryRef.current.channels, channel];
     saveChannels(memoryRef.current.channels);
     setChannels(memoryRef.current.channels);
     setActiveChannelId(channel.id);
     return channel;
+  }, []);
+
+  const toggleChannelPrivacy = useCallback((id: string) => {
+    memoryRef.current.channels = memoryRef.current.channels.map((c) =>
+      c.id === id ? { ...c, isPrivate: !c.isPrivate } : c
+    );
+    saveChannels(memoryRef.current.channels);
+    setChannels(memoryRef.current.channels);
   }, []);
 
   const renameChannel = useCallback((id: string, name: string) => {
@@ -213,6 +223,7 @@ export function useFlowStore() {
     setActiveChannelId,
     createChannel,
     renameChannel,
+    toggleChannelPrivacy,
     deleteChannel,
     addFlow,
     addFlowDirect,
@@ -224,5 +235,13 @@ export function useFlowStore() {
     addFlowLog,
     replaceStoreData,
     getSyncPayload,
+    folders: channels,
+    activeFolderId: activeChannelId,
+    setActiveFolderId: setActiveChannelId,
+    createFolder: createChannel,
+    renameFolder: renameChannel,
+    toggleFolderPrivacy: toggleChannelPrivacy,
+    deleteFolder: deleteChannel,
+    clearFolder: clearChannel,
   };
 }

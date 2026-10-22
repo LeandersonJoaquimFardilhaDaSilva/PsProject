@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="pt-BR"><head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Tove Extension</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+      <div class="send-box">
+        <div class="send-row">
+            <section id="select-placeholder" onclick="SelectChannelSwitch()">selected channel 1 2 3 4</section>
+            <button id="send">➤</button>
+          </div>
+          <div class="DropBoxClosed" id="select-channel">
+            <section id="channel-options-box">
+                <span class="channel-option">"channel 1"</span>
+                <span class="channel-option">"channel 2"</span>
+                <span class="channel-option">"channel 3"</span>
+            </section>
+            </div>
+        </div>
+    <div id="BtAction">
+      <button id="mobile-qr" title="Conectar via QR Code / Rede">Pin</button>
+      <button id="refresh" title="Atualizar">↻</button>
+    </div>
+  </header>
+
+  <main id="content">
+    
+
+    <!-- QR & Connection Modal Panel -->
+    <section id="qr-panel" hidden="" style="padding: 12px; background: var(--color-overlay-white-medium); border-radius: 10px; margin-bottom: 12px; border: 1px solid var(--color-overlay-white-border);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <strong style="font-size: 12px; color: var(--color-text-primary);">Conectar com PC ou Celular</strong>
+        <button id="close-qr-btn" style="background: none; border: none; color: var(--color-text-secondary); cursor: pointer; font-size: 14px;">✕</button>
+      </div>
+      
+      <div id="qr-img-container" style="text-align: center; margin-bottom: 8px;" hidden="">
+        <img id="qr-image" alt="QR Code de conexão" style="max-width: 180px; border-radius: 8px; background: var(--color-white); padding: 4px; display: inline-block;">
+      </div>
+
+      <div style="border-top: 1px solid var(--color-overlay-white-border); padding-top: 8px; margin-top: 8px;">
+        <label style="font-size: 11px; color: var(--color-text-label); display: block; margin-bottom: 4px;">Cole a Chave / JSON de Sincronização do Tove:</label>
+        <textarea id="qr-json-input" placeholder="{&quot;url&quot;:&quot;http://192.168.1.X:54321&quot;,&quot;token&quot;:&quot;...&quot;}" style="width: 100%; box-sizing: border-box; height: 50px; padding: 6px; font-size: 10px; border-radius: 6px; border: 1px solid var(--color-overlay-white-border); background: var(--color-overlay-black); color: var(--color-accent-cyan); resize: none; margin-bottom: 6px; font-family: monospace;"></textarea>
+        <div style="display: flex; gap: 6px;">
+          <button id="pair-json-btn" style="flex: 1; padding: 6px; font-size: 11px; font-weight: bold; background-color: #555756; color: var(--color-white); border: none; border-radius: 6px; cursor: pointer;">Conectar Dispositivo</button>
+          <button id="reset-conn-btn" style="padding: 6px 10px; font-size: 10px; background: var(--color-overlay-white-border); color: var(--color-text-secondary); border: none; border-radius: 6px; cursor: pointer;" title="Restaurar conexão padrão com o aplicativo local (127.0.0.1)">Reset</button>
+        </div>
+      </div>
+    </section>
+
+    <div class="heading"><span>Canais</span><span id="count">1</span></div>
+    <div id="channels" class="channels"><button class="channel " data-channel-id="mud7enhttktmlc" style="--channel-color:var(--color-accent-pink)"># Jogos</button></div>
+    <div class="heading"><span>Mensagens e Mídias</span><span id="links-count">12</span></div>
+    <div id="flows" class="flows">
+    <div style="padding: 1px; background: var(--color-overlay-white-softest); border-radius: 10px; border: 1px solid var(--color-overlay-white-strong); margin-bottom: 8px;">
+
+      
+      <a href="https://www.youtube.com/watch?v=Xh0NsyJgh2g" target="_blank" style="display: block;  background: var(--color-overlay-white-soft); border-radius: 8px;  margin-bottom: 1px; text-decoration: none;">
+        <img src="https://i.ytimg.com/vi/Xh0NsyJgh2g/maxresdefault.jpg" onerror="this.style.display='none'" style="width: 100%; height: 130px; object-fit: cover; border-radius: 6px; margin-bottom: 2px;" alt="">
+        <div style="padding: 0px 5px; font-weight: 100; font-size: 11px; font-family: Arial, Helvetica, sans-serif; color: var(--color-accent-cyan); margin-bottom: 2px;">They Blocked Us Because We Incriminate Them | A Lesson In Escalated Player Disrespect</div>
+        <div style="padding: 0px 5px; font-size: 10px; color: var(--color-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; ">Threat Interactive Video 34 discusses the consistent graphical abus...</div>
+      </a>
+    </div>
+    
+    
+    </div>
+  </main>
+
+  <script src="popup.js"></script>
+<!-- Code injected by live-server -->
+<script>
+	// <![CDATA[  <-- For SVG support
+	if ('WebSocket' in window) {
+		(function () {
+			function refreshCSS() {
+				var sheets = [].slice.call(document.getElementsByTagName("link"));
+				var head = document.getElementsByTagName("head")[0];
+				for (var i = 0; i < sheets.length; ++i) {
+					var elem = sheets[i];
+					var parent = elem.parentElement || head;
+					parent.removeChild(elem);
+					var rel = elem.rel;
+					if (elem.href && typeof rel != "string" || rel.length == 0 || rel.toLowerCase() == "stylesheet") {
+						var url = elem.href.replace(/(&|\?)_cacheOverride=\d+/, '');
+						elem.href = url + (url.indexOf('?') >= 0 ? '&' : '?') + '_cacheOverride=' + (new Date().valueOf());
+					}
+					parent.appendChild(elem);
+				}
+			}
+			var protocol = window.location.protocol === 'http:' ? 'ws://' : 'wss://';
+			var address = protocol + window.location.host + window.location.pathname + '/ws';
+			var socket = new WebSocket(address);
+			socket.onmessage = function (msg) {
+				if (msg.data == 'reload') window.location.reload();
+				else if (msg.data == 'refreshcss') refreshCSS();
+			};
+			if (sessionStorage && !sessionStorage.getItem('IsThisFirstTime_Log_From_LiveServer')) {
+				console.log('Live reload enabled.');
+				sessionStorage.setItem('IsThisFirstTime_Log_From_LiveServer', true);
+			}
+		})();
+	}
+	else {
+		console.error('Upgrade your browser. This Browser is NOT supported WebSocket for Live-Reloading.');
+	}
+	// ]]>
+    function SelectChannelSwitch() {
+  document.getElementById("select-channel").classList.toggle(
+    "DropBoxOpen",
+    document.getElementById("select-channel").classList.contains("DropBoxClosed")
+  );
+  document.getElementById("select-channel").classList.toggle(
+    "DropBoxClosed",
+    !document.getElementById("select-channel").classList.contains("DropBoxOpen")
+  );
+}
+</script>
+
+
+</body><div class="twell-caa"><template shadowrootmode="open">
+    <style>
+    @import url("chrome-extension://adlpodnneegcnbophopdmhedicjbcgco/caa/styles.css");
+    </style>
+    <div id="twell-caa" data-v-app=""><!----></div></template></div></html>

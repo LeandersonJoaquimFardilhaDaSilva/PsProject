@@ -72,6 +72,12 @@ export interface ElectronAPI {
   onNetTestPing: (callback: (data: { seq: number; timestamp: number; origin: string }) => void) => () => void;
   onNetTestPong: (callback: (data: { seq: number; originTimestamp: number; replyTimestamp: number; origin: string }) => void) => () => void;
   onDirectEvent: (callback: (data: { eventType: string; data: any }) => void) => () => void;
+  // Extensão do Navegador (Chrome/Edge/Brave)
+  onExtensionGetData?: (callback: (data: { reqId: string }) => void) => () => void;
+  sendExtensionDataResponse?: (reqId: string, data: { channels: any[]; flows: any[] }) => Promise<any>;
+  onExtensionAddLink?: (callback: (data: { linkId: string; link: any }) => void) => () => void;
+  sendExtensionLinkResponse?: (linkId: string, data: any) => Promise<any>;
+  updateStoreCache?: (data: { channels: any[]; flows: any[] }) => void;
 }
 
 declare global {

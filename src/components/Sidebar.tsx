@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Link2, MessageSquare, Image as ImageIcon, X, FileText, AlertTriangle } from 'lucide-react';
-import { ChannelSquaresIcon } from '@/components/PendulumLoader';
+import { Link2, MessageSquare, Image as ImageIcon, X, FileText, AlertTriangle, Folder, FolderPlus, Eye, EyeOff, Lock } from 'lucide-react';
 import type { Channel, FlowFilter } from '@/types';
 
 interface SidebarProps {
@@ -8,6 +7,8 @@ interface SidebarProps {
   activeChannelId: string | null;
   flowsCount: Record<string, number>;
   filter: FlowFilter;
+  showPrivate: boolean;
+  onToggleShowPrivate: () => void;
   onSelectChannel: (id: string) => void;
   onCreateChannel: () => void;
   onRenameChannel: (id: string, name: string) => void;
@@ -22,6 +23,8 @@ export function Sidebar({
   activeChannelId,
   flowsCount,
   filter,
+  showPrivate,
+  onToggleShowPrivate,
   onSelectChannel,
   onCreateChannel,
   onDeleteChannel,
@@ -30,6 +33,10 @@ export function Sidebar({
   onCloseMobile,
 }: SidebarProps) {
   const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
+
+  const visibleChannels = showPrivate
+    ? channels
+    : channels.filter((c) => !c.isPrivate);
 
   const sidebarContent = (
     <aside className="flex h-full w-72 md:w-64 flex-col border-r border-white/5 bg-[#0d0d12]">
@@ -52,17 +59,34 @@ export function Sidebar({
           onClick={onCreateChannel}
           className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-white/80 transition hover:border-[#ff3e6c]/40 hover:bg-white/10 hover:text-white"
         >
-          <span className="text-base leading-none">+</span> Novo Canal
+          <FolderPlus size={16} className="text-[#ff3e6c]" /> Nova Pasta
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-2">
-        <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-white/30">Canais</p>
-        {channels.length === 0 && (
-          <p className="px-3 py-2 text-xs text-white/30">Nenhum canal ainda.</p>
+        <div className="flex items-center justify-between px-3 py-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/30">Pastas</p>
+          <button
+            type="button"
+            onClick={onToggleShowPrivate}
+            className={`rounded-lg p-1 transition ${
+              showPrivate
+                ? 'text-[#00e5ff] bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20'
+                : 'text-white/40 hover:bg-white/10 hover:text-white'
+            }`}
+            title={showPrivate ? 'Ocultar pastas privadas' : 'Mostrar pastas privadas'}
+            aria-label={showPrivate ? 'Ocultar pastas privadas' : 'Mostrar pastas privadas'}
+          >
+            {showPrivate ? <Eye size={15} /> : <EyeOff size={15} />}
+          </button>
+        </div>
+        {visibleChannels.length === 0 && (
+          <p className="px-3 py-2 text-xs text-white/30">
+            {channels.length > 0 && !showPrivate ? 'Nenhuma pasta visível.' : 'Nenhuma pasta ainda.'}
+          </p>
         )}
         <ul className="space-y-1">
-          {channels.map((channel) => {
+          {visibleChannels.map((channel) => {
             const isActive = channel.id === activeChannelId;
             const count = flowsCount[channel.id] || 0;
             return (
@@ -76,20 +100,30 @@ export function Sidebar({
                     onCloseMobile?.();
                   }}
                 >
-                  <ChannelSquaresIcon color={channel.color} size={14} className="shrink-0" />
+                  <Folder
+                    size={16}
+                    style={{ color: channel.color }}
+                    className="shrink-0"
+                    fill={channel.color + '26'}
+                  />
                   <span className="flex-1 truncate">{channel.name}</span>
+                  {channel.isPrivate && (
+                    <span title="Pasta privada" aria-label="Pasta privada" className="inline-flex items-center shrink-0">
+                      <Lock size={12} className="text-[#ff3e6c]/80" />
+                    </span>
+                  )}
                   {count > 0 && (
                     <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/50">{count}</span>
                   )}
-                  {/* Botão de excluir canal: acessível no mobile sem depender de hover, com confirmação */}
+                  {/* Botão de excluir pasta: acessível no mobile sem depender de hover, com confirmação */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
                       setChannelToDelete(channel);
                     }}
                     className="flex sm:hidden sm:group-hover:flex rounded-lg p-1 text-white/30 hover:bg-red-500/20 hover:text-red-400 transition shrink-0"
-                    title={`Excluir canal #${channel.name}`}
-                    aria-label={`Excluir canal ${channel.name}`}
+                    title={`Excluir pasta ${channel.name}`}
+                    aria-label={`Excluir pasta ${channel.name}`}
                   >
                     <X size={14} />
                   </button>
@@ -148,11 +182,14 @@ export function Sidebar({
         </div>
       )}
 
-      {/* Modal de Confirmação para Deletar Canal (Item 10) */}
+      {/* Modal de Confirmação para Deletar Pasta */}
       {channelToDelete && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]"
           onClick={() => setChannelToDelete(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-delete-folder-title"
         >
           <div
             className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#16161e] p-5 shadow-2xl"
@@ -161,11 +198,11 @@ export function Sidebar({
             <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/20 text-red-400">
               <AlertTriangle size={20} />
             </div>
-            <h3 className="text-base font-semibold text-white">Excluir canal</h3>
+            <h3 id="modal-delete-folder-title" className="text-base font-semibold text-white">Excluir pasta</h3>
             <p className="mt-1.5 text-xs text-white/60 leading-relaxed">
-              Tem certeza que deseja excluir o canal{' '}
-              <span className="font-semibold text-white">#{channelToDelete.name}</span>?
-              Todas as mensagens, mídias e arquivos deste canal serão apagados.
+              Tem certeza que deseja excluir a pasta{' '}
+              <span className="font-semibold text-white">{channelToDelete.name}</span>?
+              Todas as mensagens, mídias e arquivos desta pasta serão apagados.
             </p>
             <div className="mt-5 flex items-center justify-end gap-2">
               <button
@@ -183,7 +220,7 @@ export function Sidebar({
                 }}
                 className="rounded-xl bg-red-500 hover:bg-red-600 px-3.5 py-2 text-xs font-semibold text-white shadow-lg transition"
               >
-                Excluir canal
+                Excluir pasta
               </button>
             </div>
           </div>
