@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Flow</string>
-    <string name="title_activity_main">Flow</string>
-    <string name="package_name">com.flow.organizer.mobile</string>
-    <string name="custom_url_scheme">com.flow.organizer.mobile</string>
+    <string name="app_name">Tove</string>
+    <string name="title_activity_main">Tove</string>
+    <string name="package_name">com.tove.organizer.mobile</string>
+    <string name="custom_url_scheme">com.tove.organizer.mobile</string>
 </resources>

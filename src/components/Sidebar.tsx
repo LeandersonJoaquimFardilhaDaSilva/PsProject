@@ -1,4 +1,5 @@
-import { Link2, MessageSquare, Image as ImageIcon, X, Hash } from 'lucide-react';
+import { useState } from 'react';
+import { Link2, MessageSquare, Image as ImageIcon, X, FileText, AlertTriangle, Folder, FolderPlus, Eye, EyeOff, Lock } from 'lucide-react';
 import type { Channel, FlowFilter } from '@/types';
 
 interface SidebarProps {
@@ -6,6 +7,8 @@ interface SidebarProps {
   activeChannelId: string | null;
   flowsCount: Record<string, number>;
   filter: FlowFilter;
+  showPrivate: boolean;
+  onToggleShowPrivate: () => void;
   onSelectChannel: (id: string) => void;
   onCreateChannel: () => void;
   onRenameChannel: (id: string, name: string) => void;
@@ -20,6 +23,8 @@ export function Sidebar({
   activeChannelId,
   flowsCount,
   filter,
+  showPrivate,
+  onToggleShowPrivate,
   onSelectChannel,
   onCreateChannel,
   onDeleteChannel,
@@ -27,66 +32,98 @@ export function Sidebar({
   isOpenMobile,
   onCloseMobile,
 }: SidebarProps) {
+  const [channelToDelete, setChannelToDelete] = useState<Channel | null>(null);
+
+  const visibleChannels = showPrivate
+    ? channels
+    : channels.filter((c) => !c.isPrivate);
+
   const sidebarContent = (
     <aside className="flex h-full w-72 md:w-64 flex-col border-r border-white/5 bg-[#0d0d12]">
-      <div className="flex items-center justify-between px-5 py-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-[#ff3e6c] to-[#00e5ff]">
-            <span className="text-sm font-black text-white">F</span>
-          </div>
-          <span className="text-lg font-bold tracking-tight text-white">Flow</span>
-        </div>
-        {onCloseMobile && (
+      {onCloseMobile ? (
+        <div className="flex items-center justify-end px-4 pt-3 pb-1 md:hidden">
           <button
             onClick={onCloseMobile}
-            className="rounded-lg p-1 text-white/40 hover:bg-white/5 hover:text-white md:hidden"
+            className="rounded-lg p-1.5 text-white/40 hover:bg-white/5 hover:text-white"
+            title="Fechar menu"
           >
             <X size={18} />
           </button>
-        )}
-      </div>
+        </div>
+      ) : (
+        <div className="pt-2" />
+      )}
 
-      <div className="px-3 pb-2">
+      <div className="px-3 pb-2 m-2">
         <button
           onClick={onCreateChannel}
-          className="flex w-full items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-white/80 transition hover:border-[#ff3e6c]/40 hover:bg-white/10 hover:text-white"
+          className="flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-sm font-medium text-white/80 transition hover:border-[#ff3e6c]/40 hover:bg-white/10 hover:text-white"
         >
-          <span className="text-base leading-none">+</span> Novo Canal
+          <FolderPlus size={16} className="text-[#ff3e6c]" /> Nova Pasta
         </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2 py-2">
-        <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-white/30">Canais</p>
-        {channels.length === 0 && (
-          <p className="px-3 py-2 text-xs text-white/30">Nenhum canal ainda.</p>
+        <div className="flex items-center justify-between px-3 py-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-white/30">Pastas</p>
+          <button
+            type="button"
+            onClick={onToggleShowPrivate}
+            className={`rounded-lg p-1 transition ${
+              showPrivate
+                ? 'text-[#00e5ff] bg-[#00e5ff]/10 hover:bg-[#00e5ff]/20'
+                : 'text-white/40 hover:bg-white/10 hover:text-white'
+            }`}
+            title={showPrivate ? 'Ocultar pastas privadas' : 'Mostrar pastas privadas'}
+            aria-label={showPrivate ? 'Ocultar pastas privadas' : 'Mostrar pastas privadas'}
+          >
+            {showPrivate ? <Eye size={15} /> : <EyeOff size={15} />}
+          </button>
+        </div>
+        {visibleChannels.length === 0 && (
+          <p className="px-3 py-2 text-xs text-white/30">
+            {channels.length > 0 && !showPrivate ? 'Nenhuma pasta visível.' : 'Nenhuma pasta ainda.'}
+          </p>
         )}
         <ul className="space-y-1">
-          {channels.map((channel) => {
+          {visibleChannels.map((channel) => {
             const isActive = channel.id === activeChannelId;
             const count = flowsCount[channel.id] || 0;
             return (
               <li key={channel.id}>
                 <div
-                  className={`group flex cursor-pointer items-center gap-2 rounded-lg px-3 py-2 text-sm transition ${
-                    isActive ? 'bg-white/10 text-white' : 'text-white/60 hover:bg-white/5 hover:text-white/90'
+                  className={`group flex cursor-pointer items-center gap-2 rounded-xl px-3 py-2 text-sm transition ${
+                    isActive ? 'bg-white/10 text-white font-medium' : 'text-white/60 hover:bg-white/5 hover:text-white/90'
                   }`}
                   onClick={() => {
                     onSelectChannel(channel.id);
                     onCloseMobile?.();
                   }}
                 >
-                  <Hash size={16} style={{ color: channel.color }} />
+                  <Folder
+                    size={16}
+                    style={{ color: channel.color }}
+                    className="shrink-0"
+                    fill={channel.color + '26'}
+                  />
                   <span className="flex-1 truncate">{channel.name}</span>
+                  {channel.isPrivate && (
+                    <span title="Pasta privada" aria-label="Pasta privada" className="inline-flex items-center shrink-0">
+                      <Lock size={12} className="text-[#ff3e6c]/80" />
+                    </span>
+                  )}
                   {count > 0 && (
                     <span className="rounded-full bg-white/10 px-2 py-0.5 text-xs text-white/50">{count}</span>
                   )}
+                  {/* Botão de excluir pasta: acessível no mobile sem depender de hover, com confirmação */}
                   <button
                     onClick={(e) => {
                       e.stopPropagation();
-                      onDeleteChannel(channel.id);
+                      setChannelToDelete(channel);
                     }}
-                    className="hidden rounded p-0.5 text-white/30 hover:bg-red-500/20 hover:text-red-400 group-hover:block"
-                    aria-label="Excluir canal"
+                    className="flex sm:hidden sm:group-hover:flex rounded-lg p-1 text-white/30 hover:bg-red-500/20 hover:text-red-400 transition shrink-0"
+                    title={`Excluir pasta ${channel.name}`}
+                    aria-label={`Excluir pasta ${channel.name}`}
                   >
                     <X size={14} />
                   </button>
@@ -105,6 +142,7 @@ export function Sidebar({
             { key: 'link' as const, label: '', icon: Link2 },
             { key: 'text' as const, label: '', icon: MessageSquare },
             { key: 'image' as const, label: '', icon: ImageIcon },
+            { key: 'file' as const, label: '', icon: FileText },
           ].map(({ key, label, icon: Icon }) => (
             <button
               key={key}
@@ -140,6 +178,51 @@ export function Sidebar({
           />
           <div className="relative z-50 h-full animate-[flowIn_0.2s_ease-out]">
             {sidebarContent}
+          </div>
+        </div>
+      )}
+
+      {/* Modal de Confirmação para Deletar Pasta */}
+      {channelToDelete && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4 backdrop-blur-sm animate-[fadeIn_0.15s_ease-out]"
+          onClick={() => setChannelToDelete(null)}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="modal-delete-folder-title"
+        >
+          <div
+            className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#16161e] p-5 shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="mb-3 flex h-10 w-10 items-center justify-center rounded-xl bg-red-500/20 text-red-400">
+              <AlertTriangle size={20} />
+            </div>
+            <h3 id="modal-delete-folder-title" className="text-base font-semibold text-white">Excluir pasta</h3>
+            <p className="mt-1.5 text-xs text-white/60 leading-relaxed">
+              Tem certeza que deseja excluir a pasta{' '}
+              <span className="font-semibold text-white">{channelToDelete.name}</span>?
+              Todas as mensagens, mídias e arquivos desta pasta serão apagados.
+            </p>
+            <div className="mt-5 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setChannelToDelete(null)}
+                className="rounded-xl border border-white/10 bg-white/5 px-3.5 py-2 text-xs font-medium text-white/70 hover:bg-white/10 hover:text-white transition"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onDeleteChannel(channelToDelete.id);
+                  setChannelToDelete(null);
+                }}
+                className="rounded-xl bg-red-500 hover:bg-red-600 px-3.5 py-2 text-xs font-semibold text-white shadow-lg transition"
+              >
+                Excluir pasta
+              </button>
+            </div>
           </div>
         </div>
       )}

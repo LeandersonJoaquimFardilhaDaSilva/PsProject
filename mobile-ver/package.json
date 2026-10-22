@@ -1,7 +1,7 @@
 {
-  "name": "mobile-ver",
+  "name": "tove-mobile",
   "version": "1.0.0",
-  "description": "",
+  "description": "Tove Mobile — Transfer, Organize, Visualize, Everywhere",
   "main": "index.js",
   "scripts": {
     "sync": "npx cap sync android",

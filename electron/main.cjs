@@ -1,12 +1,19 @@
 const { app, BrowserWindow, ipcMain, shell } = require('electron');
 const path = require('path');
-const { startSyncServer, getLocalIps } = require('./syncServer.cjs');
+const fs = require('fs');
+const { startSyncServer, getLocalIps, sanitizeName } = require('./syncServer.cjs');
 
 let mainWindow = null;
 let syncServerInstance = null;
 
 function createWindow() {
+  const appIcon = path.join(__dirname, '../assets/logo alt 2 icon.png');
+  const appIconIco = path.join(__dirname, '../assets/logo alt 2 icon.ico');
+  const resolvedIcon = fs.existsSync(appIcon) ? appIcon : (fs.existsSync(appIconIco) ? appIconIco : undefined);
+
   mainWindow = new BrowserWindow({
+    title: 'Tove',
+    icon: resolvedIcon,
     width: 1100,
     height: 750,
     minWidth: 840,
@@ -19,6 +26,7 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false,
+      plugins: true,
     },
   });
 
@@ -108,7 +116,7 @@ ipcMain.handle('fetch-direct-html', async (_, targetUrl) => {
       signal: controller.signal,
       headers: {
         'User-Agent':
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 FlowApp/1.0',
+          'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.html); Twitterbot/1.0; Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 FlowApp/1.0',
         Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
         'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
       },
@@ -135,6 +143,7 @@ ipcMain.handle('get-sync-info', () => {
       token: '',
       ips,
       qrData: null,
+      clientCount: 0,
     };
   }
   return {
@@ -143,6 +152,7 @@ ipcMain.handle('get-sync-info', () => {
     token: syncServerInstance.token,
     ips: syncServerInstance.ips,
     qrData: syncServerInstance.getQrData(),
+    clientCount: syncServerInstance.getClientCount ? syncServerInstance.getClientCount() : 0,
   };
 });
 
@@ -160,9 +170,156 @@ ipcMain.handle('regenerate-sync-token', () => {
   return null;
 });
 
+// Handlers de Arquivos no Diretório Documents (v0.3.0)
+ipcMain.handle('get-documents-folder', () => {
+  const docs = app.getPath('documents');
+  const target = path.join(docs, 'Tove', 'channels');
+  if (!fs.existsSync(target)) {
+    try {
+      fs.mkdirSync(target, { recursive: true });
+    } catch {
+      // Ignora
+    }
+  }
+  return target;
+});
+
+ipcMain.handle('save-file-to-documents', async (_, { channelName, fileName, bufferData }) => {
+  const docs = app.getPath('documents');
+  const safeChannel = sanitizeName(channelName || 'Geral');
+  const safeFile = sanitizeName(fileName || `arquivo_${Date.now()}`);
+  const targetDir = path.join(docs, 'Tove', 'channels', safeChannel);
+
+  if (!fs.existsSync(targetDir)) {
+    fs.mkdirSync(targetDir, { recursive: true });
+  }
+
+  const filePath = path.join(targetDir, safeFile);
+  const buffer = Buffer.from(bufferData);
+  await fs.promises.writeFile(filePath, buffer);
+
+  return {
+    filePath,
+    fileSize: buffer.length,
+    fileName: safeFile,
+    channelName: safeChannel,
+  };
+});
+
+ipcMain.handle('open-file-location', async (_, filePath) => {
+  if (filePath && fs.existsSync(filePath)) {
+    shell.showItemInFolder(filePath);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('open-file-external', async (_, filePath) => {
+  if (filePath && fs.existsSync(filePath)) {
+    await shell.openPath(filePath);
+    return true;
+  }
+  return false;
+});
+
+let storeCache = {
+  channels: [],
+  flows: [],
+};
+
+ipcMain.on('update-store-cache', (_, data) => {
+  if (data) {
+    if (Array.isArray(data.channels)) storeCache.channels = data.channels;
+    if (Array.isArray(data.flows)) storeCache.flows = data.flows;
+  }
+});
+
+ipcMain.handle('broadcast-sync-push', (_, data) => {
+  if (data?.data?.channels) {
+    storeCache.channels = data.data.channels;
+    storeCache.flows = data.data.flows || [];
+  }
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast(data);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('register-original-file', (_, { fileId, originalPath, fileName, fileSize }) => {
+  if (syncServerInstance?.registerOriginalFile) {
+    syncServerInstance.registerOriginalFile(fileId, originalPath, fileName, fileSize);
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('request-file-download-from-mobile', (_, { fileId, channelName, fileName }) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({
+      type: 'request_file_transfer',
+      fileId,
+      channelName,
+      fileName,
+    });
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('send-net-test-ping', (_, data) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({ type: 'net_ping', ...data });
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('send-net-test-pong', (_, data) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({ type: 'net_pong', ...data });
+    return true;
+  }
+  return false;
+});
+
+ipcMain.handle('broadcast-direct-event', (_, data) => {
+  if (syncServerInstance?.broadcast) {
+    syncServerInstance.broadcast({ type: 'direct_event', ...data });
+    return true;
+  }
+  return false;
+});
+
 app.whenReady().then(async () => {
   try {
     syncServerInstance = await startSyncServer({
+      documentsPath: app.getPath('documents'),
+      onFileReceived: (fileInfo) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('file-received-from-mobile', fileInfo);
+        }
+      },
+      onFileProgress: (progressInfo) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('file-transfer-progress', progressInfo);
+        }
+      },
+      onNetTestPing: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('net-test-ping-received', data);
+        }
+      },
+      onNetTestPong: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('net-test-pong-received', data);
+        }
+      },
+      onDirectEvent: (data) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('direct-event-received', data);
+        }
+      },
       onSyncRequest: async (payload) => {
         if (!mainWindow || mainWindow.isDestroyed()) {
           throw new Error('Janela do aplicativo não está disponível para sincronizar');
@@ -188,9 +345,70 @@ app.whenReady().then(async () => {
           });
         });
       },
+      onGetData: async () => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          return storeCache;
+        }
+        return new Promise((resolve) => {
+          const reqId = Math.random().toString(36).slice(2);
+          const timer = setTimeout(() => {
+            ipcMain.removeHandler(`get-extension-data-response-${reqId}`);
+            resolve(storeCache);
+          }, 2500);
+
+          ipcMain.handleOnce(`get-extension-data-response-${reqId}`, (_event, res) => {
+            clearTimeout(timer);
+            if (res && Array.isArray(res.channels)) {
+              storeCache.channels = res.channels;
+              storeCache.flows = res.flows || [];
+              resolve(res);
+            } else {
+              resolve(storeCache);
+            }
+          });
+
+          mainWindow.webContents.send('extension-get-data', { reqId });
+        });
+      },
+      onAddLink: async (linkData) => {
+        if (!mainWindow || mainWindow.isDestroyed()) {
+          throw new Error('Janela do Tove não está aberta no momento');
+        }
+        return new Promise((resolve, reject) => {
+          const linkId = Math.random().toString(36).slice(2);
+          const timer = setTimeout(() => {
+            ipcMain.removeHandler(`extension-add-link-response-${linkId}`);
+            reject(new Error('Tempo limite para adicionar link no desktop esgotado'));
+          }, 6000);
+
+          ipcMain.handleOnce(`extension-add-link-response-${linkId}`, (_event, result) => {
+            clearTimeout(timer);
+            if (result?.error) {
+              reject(new Error(result.error));
+            } else {
+              resolve(result);
+            }
+          });
+
+          mainWindow.webContents.send('extension-add-link', {
+            linkId,
+            link: linkData,
+          });
+        });
+      },
       onClientConnected: (clientInfo) => {
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('sync-client-connected', clientInfo);
+        }
+      },
+      onWsClientCountChange: (count) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('ws-clients-count-change', count);
+        }
+      },
+      onClientActivity: (activityInfo) => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('sync-client-heartbeat', activityInfo);
         }
       },
     });

@@ -1,13 +1,19 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 
 export interface LinkPreview {
   title?: string;
   description?: string;
   image?: string;
   siteName?: string;
+  isPortrait?: boolean;
 }
 
-export type PreviewProviderId = 'native' | 'microlink' | 'urlmeta' | 'cors_proxy';
+export type PreviewProviderId =
+  | 'native'
+  | 'oembed'
+  | 'google_favicon'
+  | 'heuristic'
+  | 'microlink';
 
 export interface PreviewProviderConfig {
   id: PreviewProviderId;
@@ -33,31 +39,38 @@ export interface ProviderTestResult {
 export const DEFAULT_PREVIEW_PROVIDERS: PreviewProviderConfig[] = [
   {
     id: 'native',
-    name: 'Nativo Direto (Electron Node.js / CapacitorHttp)',
-    description: 'Download direto do HTML pelo processo nativo sem intermediários públicos, com parsing local de meta tags.',
+    name: 'Nativo com User-Agent Social (WhatsApp/Twitterbot)',
+    description: 'Download direto do HTML pelo processo nativo com disfarce de crawler social, contornando bloqueios e extraindo OpenGraph direto da fonte.',
     enabled: true,
     timeoutMs: 8000,
+  },
+  {
+    id: 'oembed',
+    name: 'Protocolo Oficial oEmbed (YouTube, Reddit, etc.)',
+    description: 'Padrão aberto oficial W3C suportado nativamente pelo YouTube, Reddit, Vimeo, Spotify e TikTok, com thumbnail e título originais.',
+    enabled: true,
+    timeoutMs: 6000,
+  },
+  {
+    id: 'google_favicon',
+    name: 'Google S2 Favicon API (Ícones Globais)',
+    description: 'Serviço global do Google que obtém o logo/ícone oficial de qualquer site em alta resolução (128px), garantindo imagem sempre.',
+    enabled: true,
+    timeoutMs: 5000,
+  },
+  {
+    id: 'heuristic',
+    name: 'Parser Heurístico de URL (100% Offline)',
+    description: 'Analisa o domínio e o caminho semântico da URL sem precisar de conexão à internet, formatando títulos limpos e legíveis.',
+    enabled: true,
+    timeoutMs: 1000,
   },
   {
     id: 'microlink',
-    name: 'Microlink API',
-    description: 'Serviço em nuvem da api.microlink.io que processa a página e extrai metadados estruturados.',
+    name: 'Microlink API (Nuvem)',
+    description: 'Serviço público em nuvem da api.microlink.io que renderiza páginas e extrai dados estruturados.',
     enabled: true,
     timeoutMs: 8000,
-  },
-  {
-    id: 'urlmeta',
-    name: 'Urlmeta API',
-    description: 'Serviço gratuito api.urlmeta.org para extração rápida de OpenGraph e Twitter Cards.',
-    enabled: true,
-    timeoutMs: 8000,
-  },
-  {
-    id: 'cors_proxy',
-    name: 'Proxy AllOrigins + Parser Local',
-    description: 'Usa o proxy público allorigins.win como contingência e analisa as tags HTML no cliente.',
-    enabled: true,
-    timeoutMs: 10000,
   },
 ];
 
@@ -78,15 +91,26 @@ export function loadPreviewSettings(): PreviewSettings {
       return getDefaultPreviewSettings();
     }
 
-    // Garantir que novos provedores que venham a existir sejam mesclados
-    const existingIds = new Set(parsed.providers.map((p) => p.id));
-    const mergedProviders = [...parsed.providers];
+    const validMap = new Map(DEFAULT_PREVIEW_PROVIDERS.map((p) => [p.id, p]));
+    const cleaned = parsed.providers
+      .filter((p) => validMap.has(p.id))
+      .map((p) => {
+        const def = validMap.get(p.id)!;
+        return {
+          ...def,
+          enabled: typeof p.enabled === 'boolean' ? p.enabled : def.enabled,
+          timeoutMs: p.timeoutMs || def.timeoutMs,
+        };
+      });
+
+    const existingIds = new Set(cleaned.map((p) => p.id));
     for (const def of DEFAULT_PREVIEW_PROVIDERS) {
       if (!existingIds.has(def.id)) {
-        mergedProviders.push(def);
+        cleaned.push(def);
       }
     }
-    return { providers: mergedProviders };
+
+    return { providers: cleaned.length > 0 ? cleaned : DEFAULT_PREVIEW_PROVIDERS };
   } catch {
     return getDefaultPreviewSettings();
   }
@@ -107,8 +131,10 @@ export function isUrl(value: string): boolean {
 }
 
 export function normalizeUrl(value: string): string {
-  const trimmed = value.trim();
-  if (!/^https?:\/\//i.test(trimmed)) return `https://${trimmed}`;
+  let trimmed = value.trim();
+  if (!/^https?:\/\//i.test(trimmed)) {
+    trimmed = `https://${trimmed}`;
+  }
   return trimmed;
 }
 
@@ -132,52 +158,177 @@ async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
   }
 }
 
-// Método 1: Nativo Direto (Electron Node.js ou Android CapacitorHttp)
-export async function tryNativeScraper(url: string, timeoutMs = 8000): Promise<LinkPreview> {
+// ============================================================================
+// 1. Método Nativo com User-Agent Social (WhatsApp/Twitterbot)
+// ============================================================================
+export async function tryNativeSocialCrawler(url: string, timeoutMs = 8000): Promise<LinkPreview> {
+  const normalized = normalizeUrl(url);
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.fetchDirectHtml);
   const isNativeMobile = Capacitor.isNativePlatform();
 
   let html = '';
 
   if (isElectron && window.electronAPI?.fetchDirectHtml) {
-    // Desktop: Executa no processo Node.js principal sem CORS
-    html = await withTimeout(window.electronAPI.fetchDirectHtml(url), timeoutMs);
+    // Desktop Electron (via Node.js nativo sem bloqueio de CORS)
+    html = await withTimeout(window.electronAPI.fetchDirectHtml(normalized), timeoutMs);
   } else if (isNativeMobile) {
-    // Mobile: Executa pelo CapacitorHttp nativo do Android
+    // Mobile Android (via CapacitorHttp nativo do Android com cabeçalho de crawler social)
     const res = await withTimeout(
-      fetch(url, {
+      CapacitorHttp.get({
+        url: normalized,
         headers: {
           'User-Agent':
-            'Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36 FlowApp/1.0',
+            'facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.html); Twitterbot/1.0; Mozilla/5.0 (Linux; Android 14) Flow/1.0',
           Accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
         },
+        responseType: 'text',
       }),
       timeoutMs
     );
-    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
-    html = await res.text();
+    html = typeof res.data === 'string' ? res.data : JSON.stringify(res.data);
   } else {
-    // Web padrão: Tentativa direta com fetch
-    const res = await withTimeout(fetch(url), timeoutMs);
+    // Web padrão
+    const res = await withTimeout(fetch(normalized), timeoutMs);
     if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
     html = await res.text();
   }
 
   if (!html || html.length < 50) {
-    throw new Error('Conteúdo HTML vazio ou insuficiente');
+    throw new Error('Conteúdo HTML retornado é vazio');
   }
 
-  const preview = parseMetaTags(html, url);
+  const preview = parseMetaTags(html, normalized);
   if (!preview.title && !preview.image) {
-    throw new Error('Nenhuma meta tag OpenGraph ou título encontrado na página');
+    throw new Error('Nenhuma meta tag OpenGraph encontrada no site');
   }
+
+  // Se não encontrou imagem no HTML, completa com Google S2 Favicon
+  if (!preview.image) {
+    preview.image = `https://www.google.com/s2/favicons?domain=${getDomain(normalized)}&sz=128`;
+  }
+
   return preview;
 }
 
-// Método 2: Microlink API
+// ============================================================================
+// 2. Método Oficial oEmbed (YouTube, Reddit, Vimeo, TikTok, Spotify, etc.)
+// ============================================================================
+export async function tryOEmbed(url: string, timeoutMs = 6000): Promise<LinkPreview> {
+  const normalized = normalizeUrl(url);
+  const u = new URL(normalized);
+  const host = u.hostname.replace(/^www\./, '').toLowerCase();
+
+  let endpoint = '';
+
+  if (host.includes('youtube.com') || host.includes('youtu.be')) {
+    endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(normalized)}&format=json`;
+  } else if (host.includes('reddit.com')) {
+    endpoint = `https://www.reddit.com/oembed?url=${encodeURIComponent(normalized)}`;
+  } else if (host.includes('vimeo.com')) {
+    endpoint = `https://vimeo.com/api/oembed.json?url=${encodeURIComponent(normalized)}`;
+  } else if (host.includes('tiktok.com')) {
+    endpoint = `https://www.tiktok.com/oembed?url=${encodeURIComponent(normalized)}`;
+  } else if (host.includes('spotify.com')) {
+    endpoint = `https://open.spotify.com/oembed?url=${encodeURIComponent(normalized)}`;
+  } else if (host.includes('codepen.io')) {
+    endpoint = `https://codepen.io/api/oembed?url=${encodeURIComponent(normalized)}&format=json`;
+  } else if (host.includes('flickr.com')) {
+    endpoint = `https://www.flickr.com/services/oembed/?url=${encodeURIComponent(normalized)}&format=json`;
+  } else {
+    throw new Error(`oEmbed direto não configurado para o domínio ${host}`);
+  }
+
+  const res = await withTimeout(fetch(endpoint), timeoutMs);
+  if (!res.ok) throw new Error(`Endpoint oEmbed retornou status HTTP ${res.status}`);
+  const data = await res.json();
+
+  const title = data.title || undefined;
+  const image = data.thumbnail_url || data.thumbnail || undefined;
+  const siteName = data.provider_name || getDomain(normalized);
+  const description = data.author_name ? `Por ${data.author_name}` : undefined;
+
+  if (!title && !image) {
+    throw new Error('Resposta oEmbed não contém título nem imagem');
+  }
+
+  return { title, description, image, siteName };
+}
+
+// ============================================================================
+// 3. Método Google S2 Favicon API
+// ============================================================================
+export async function tryGoogleFavicon(url: string, timeoutMs = 5000): Promise<LinkPreview> {
+  const normalized = normalizeUrl(url);
+  const domain = getDomain(normalized);
+  const iconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+
+  // Validação segura de carregamento de imagem sem bloqueio de CORS
+  if (typeof window !== 'undefined' && typeof Image !== 'undefined') {
+    await withTimeout(
+      new Promise<void>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve();
+        img.onerror = () => reject(new Error('Favicon não pôde ser carregado'));
+        img.src = iconUrl;
+      }),
+      timeoutMs
+    ).catch(() => {
+      // Ignora erro ou timeout para não impedir fallback visual
+    });
+  }
+
+  const cleanName = domain.charAt(0).toUpperCase() + domain.slice(1);
+  return {
+    title: cleanName,
+    description: `Acessar ${domain}`,
+    image: iconUrl,
+    siteName: domain,
+  };
+}
+
+// ============================================================================
+// 4. Método Heurístico Inteligente (100% Offline)
+// ============================================================================
+export async function tryHeuristic(url: string): Promise<LinkPreview> {
+  const normalized = normalizeUrl(url);
+  const u = new URL(normalized);
+  const domain = u.hostname.replace(/^www\./, '');
+
+  // Limpar pathname para gerar título legível
+  const pathParts = u.pathname
+    .split('/')
+    .filter(Boolean)
+    .map((seg) => decodeURIComponent(seg).replace(/[-_.]+/g, ' ').trim())
+    .filter(Boolean);
+
+  let title = domain;
+  if (pathParts.length > 0) {
+    // Pega os últimos segmentos relevantes
+    const slug = pathParts[pathParts.length - 1];
+    if (slug.length > 2) {
+      title = `${slug.charAt(0).toUpperCase() + slug.slice(1)} · ${domain}`;
+    }
+  }
+
+  const domainCapitalized = domain.split('.')[0];
+  const siteName = domainCapitalized.charAt(0).toUpperCase() + domainCapitalized.slice(1);
+  const iconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`;
+
+  return {
+    title,
+    description: `Link de ${domain}`,
+    image: iconUrl,
+    siteName,
+  };
+}
+
+// ============================================================================
+// 5. Método Microlink API (Nuvem com normalização de URL)
+// ============================================================================
 export async function tryMicrolink(url: string, timeoutMs = 8000): Promise<LinkPreview> {
+  const normalized = normalizeUrl(url);
   const res = await withTimeout(
-    fetch(`https://api.microlink.io/?url=${encodeURIComponent(url)}`),
+    fetch(`https://api.microlink.io/?url=${encodeURIComponent(normalized)}`),
     timeoutMs
   );
   if (!res.ok) throw new Error(`Microlink falhou com status HTTP ${res.status}`);
@@ -190,43 +341,22 @@ export async function tryMicrolink(url: string, timeoutMs = 8000): Promise<LinkP
     title: data.title || undefined,
     description: data.description || undefined,
     image: data.image?.url || data.logo?.url || undefined,
-    siteName: data.publisher || data.author || getDomain(url),
+    siteName: data.publisher || data.author || getDomain(normalized),
   };
 }
 
-// Método 3: Urlmeta API
-export async function tryUrlmeta(url: string, timeoutMs = 8000): Promise<LinkPreview> {
-  const res = await withTimeout(
-    fetch(`https://api.urlmeta.org/?url=${encodeURIComponent(url)}`),
-    timeoutMs
-  );
-  if (!res.ok) throw new Error(`Urlmeta falhou com status HTTP ${res.status}`);
-  const json = await res.json();
-  if (json.meta?.status !== 'OK') {
-    throw new Error(json.meta?.message || 'Urlmeta não retornou status OK');
-  }
-  const m = json.meta;
-  return {
-    title: m.title || undefined,
-    description: m.description || undefined,
-    image: m.image || m['twitter:image'] || undefined,
-    siteName: m.site_name || m.publisher || getDomain(url),
-  };
-}
-
-// Método 4: Proxy CORS AllOrigins + Parser Local
-export async function tryCorsProxy(url: string, timeoutMs = 10000): Promise<LinkPreview> {
-  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`;
-  const res = await withTimeout(fetch(proxyUrl), timeoutMs);
-  if (!res.ok) throw new Error(`Proxy AllOrigins falhou com status HTTP ${res.status}`);
-  const html = await res.text();
-  if (!html || html.length < 50) throw new Error('Proxy retornou resposta vazia');
-
-  const preview = parseMetaTags(html, url);
-  if (!preview.title && !preview.image) {
-    throw new Error('Nenhuma meta tag encontrada no HTML retornado pelo proxy');
-  }
-  return preview;
+function decodeHtmlEntities(str?: string): string | undefined {
+  if (!str) return undefined;
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&#x27;/g, "'")
+    .replace(/&ndash;/g, '–')
+    .replace(/&mdash;/g, '—')
+    .trim();
 }
 
 export function parseMetaTags(html: string, url: string): LinkPreview {
@@ -249,12 +379,12 @@ export function parseMetaTags(html: string, url: string): LinkPreview {
   };
 
   const titleMatch = html.match(/<title[^>]*>([^<]+)<\/title>/i);
-  const title =
+  const rawTitle =
     getMeta(['twitter:title', 'og:title']) ||
     titleMatch?.[1]?.trim() ||
     undefined;
 
-  const description =
+  const rawDescription =
     getMeta(['twitter:description', 'og:description', 'description']) ||
     undefined;
 
@@ -270,9 +400,14 @@ export function parseMetaTags(html: string, url: string): LinkPreview {
     }
   }
 
-  const siteName = getMeta(['og:site_name', 'application-name']) || getDomain(url);
+  const rawSiteName = getMeta(['og:site_name', 'application-name']) || getDomain(url);
 
-  return { title, description, image, siteName };
+  return {
+    title: decodeHtmlEntities(rawTitle),
+    description: decodeHtmlEntities(rawDescription),
+    image,
+    siteName: decodeHtmlEntities(rawSiteName),
+  };
 }
 
 function mergePreviews(...previews: LinkPreview[]): LinkPreview {
@@ -290,10 +425,11 @@ const PROVIDER_RUNNERS: Record<
   PreviewProviderId,
   (url: string, timeoutMs?: number) => Promise<LinkPreview>
 > = {
-  native: tryNativeScraper,
+  native: tryNativeSocialCrawler,
+  oembed: tryOEmbed,
+  google_favicon: tryGoogleFavicon,
+  heuristic: (u) => tryHeuristic(u),
   microlink: tryMicrolink,
-  urlmeta: tryUrlmeta,
-  cors_proxy: tryCorsProxy,
 };
 
 /**
@@ -304,6 +440,7 @@ export async function testSingleProvider(
   url: string,
   timeoutMs = 8000
 ): Promise<ProviderTestResult> {
+  const normalized = normalizeUrl(url);
   const provider = DEFAULT_PREVIEW_PROVIDERS.find((p) => p.id === providerId);
   const providerName = provider ? provider.name : providerId;
 
@@ -320,7 +457,7 @@ export async function testSingleProvider(
   }
 
   try {
-    const data = await runner(url, timeoutMs);
+    const data = await runner(normalized, timeoutMs);
     const durationMs = Math.round(performance.now() - start);
     return {
       providerId,
@@ -345,33 +482,50 @@ export async function testSingleProvider(
  * Executa a extração completa de preview respeitando as configurações e a ordem salva
  */
 export async function fetchLinkPreview(url: string): Promise<LinkPreview> {
+  const normalized = normalizeUrl(url);
   const settings = loadPreviewSettings();
   const activeProviders = settings.providers.filter((p) => p.enabled);
 
-  // Se nenhum estiver ativado, usa todos por segurança
   const providersToRun = activeProviders.length > 0 ? activeProviders : DEFAULT_PREVIEW_PROVIDERS;
-
   const results: LinkPreview[] = [];
 
   for (const prov of providersToRun) {
     const runner = PROVIDER_RUNNERS[prov.id];
     if (!runner) continue;
     try {
-      const result = await runner(url, prov.timeoutMs);
+      const result = await runner(normalized, prov.timeoutMs);
       results.push(result);
-      // Se já temos título e imagem, encerra a busca antecipadamente
+      // Se já temos título e imagem, encerra
       if (result.image && result.title) break;
-    } catch (err) {
-      console.warn(`[LinkPreview] Provedor ${prov.name} falhou:`, err);
-      // Passa para o próximo método configurado
+    } catch {
+      // Tenta próximo provedor
     }
   }
 
+  // Fallback final: heurístico
   if (results.length === 0) {
-    return { siteName: getDomain(url), title: getDomain(url) };
+    return await tryHeuristic(normalized);
   }
 
-  return mergePreviews(...results);
+  const merged = mergePreviews(...results);
+  if (merged.image && typeof window !== 'undefined' && typeof Image !== 'undefined') {
+    try {
+      const isPortrait = await withTimeout(
+        new Promise<boolean>((resolve) => {
+          const img = new Image();
+          img.onload = () => resolve(img.naturalHeight > img.naturalWidth);
+          img.onerror = () => resolve(false);
+          img.src = merged.image!;
+        }),
+        2500
+      );
+      merged.isPortrait = isPortrait;
+    } catch {
+      // Ignora timeout ou erro de carregamento no probing
+    }
+  }
+
+  return merged;
 }
 
 export function isValidImageUrl(url: string): boolean {

@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Document</title>
+    <style>
+        @keyframes flowIn {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .card {
+            animation: flowIn 0.4s ease-out;
+            display: grid;
+            align-items: flex-start;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            grid-template-areas:
+                "image header"
+                "image footer";
+            gap: 12px;
+        }
+
+        .CardHeader {
+            grid-area: header;
+            margin-bottom: 0 !important;
+        }
+
+        .card-image {
+            grid-area: image;
+            min-height: 176px;
+            margin-bottom: 0 !important;
+        }
+
+        .CardFooter {
+            grid-area: footer;
+        }
+
+        .card:hover {
+            border-color: rgba(255, 255, 255, 0.2) !important;
+            background-color: #1a1a24 !important;
+        }
+
+        .card-actions {
+            transition: opacity 0.2s ease;
+        }
+
+        .card-image img {
+            transition: transform 0.2s ease;
+        }
+
+        .card:hover .card-image img {
+            transform: scale(1.02);
+        }
+
+        .card-actions button:hover {
+            color: #fff !important;
+        }
+
+        .card-actions button[title="Excluir"]:hover {
+            color: #f87171 !important;
+        }
+
+        .card-link {
+            transition: color 0.2s ease, text-decoration-color 0.2s ease;
+        }
+
+        .card-link:hover {
+            color: #00e5ff !important;
+            text-decoration: underline !important;
+        }
+
+        @media (min-width: 640px) {
+            .card {
+                padding: 16px !important;
+            }
+
+            .card-actions {
+                opacity: 0.8 !important;
+            }
+
+            .card:hover .card-actions {
+                opacity: 1 !important;
+            }
+        }
+    </style>
+</head>
+<body style="width: 672px;">
+    <div class="card" style="position: relative; max-height: 100%; width: 100%; max-width: 100%; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 16px; background-color: #16161e; padding: 14px; transition: border-color 0.2s ease, background-color 0.2s ease;">
+        <div class="CardHeader" style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px;">
+            <span style="display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; border-radius: 8px; color: #00e5ff; background-color: rgba(0, 229, 255, 0.1);">
+                <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M9 17H7A5 5 0 0 1 7 7h2"></path>
+                    <path d="M15 7h2a5 5 0 1 1 0 10h-2"></path>
+                    <line x1="8" x2="16" y1="12" y2="12"></line>
+                </svg>
+            </span>
+            <span style="font-size: 12px; color: rgba(255, 255, 255, 0.3);">56min</span>
+            <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; color: rgba(255, 255, 255, 0.4);">· ROMSFUN.COM</span>
+            <div class="card-actions" style="display: flex; align-items: center; gap: 4px; margin-left: auto; opacity: 0.9; transition: opacity 0.2s ease;">
+                <button style="border: 0; border-radius: 8px; padding: 6px; color: rgba(255, 255, 255, 0.3); background: transparent; cursor: pointer; transition: color 0.2s ease;" title="Fixar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <line x1="12" x2="12" y1="17" y2="22"></line>
+                        <path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24Z"></path>
+                    </svg>
+                </button>
+                <button style="border: 0; border-radius: 8px; padding: 6px; color: rgba(255, 255, 255, 0.3); background: transparent; cursor: pointer; transition: color 0.2s ease;" title="Copiar">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect>
+                        <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path>
+                    </svg>
+                </button>
+                <button style="border: 0; border-radius: 8px; padding: 6px; color: rgba(255, 255, 255, 0.3); background: transparent; cursor: pointer; transition: color 0.2s ease;" title="Excluir">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 6h18"></path>
+                        <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path>
+                        <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path>
+                        <line x1="10" x2="10" y1="11" y2="17"></line>
+                        <line x1="14" x2="14" y1="11" y2="17"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+        <div class="card-image" style="overflow: hidden; margin-bottom: 12px; border-radius: 12px;max-width: fit-content;">
+            <img src="https://romsfun.com/wp-content/uploads/2021/04/1618735970-40b8b3a9-af29-4370-8eb9-951732f7cc19.jpg" alt="Mortal Kombat 11 PKG - PS4 Game" style="display: block; width: 100%; height: 100%; object-fit: cover; transition: transform 0.2s ease;" loading="lazy">
+        </div>
+        <div class="CardFooter" style="display: flex; flex-direction: column; align-items: flex-start; width: 100%; height: 100%;">
+            <h3 style="margin: 0 0 4px; color: #fff; font-weight: 600; line-height: 1.375; cursor: text; user-select: text;">Mortal Kombat 11 PKG - PS4 Game</h3>
+            <p style="display: -webkit-box; overflow: hidden; margin: 0 0 8px; color: rgba(255, 255, 255, 0.5); font-size: 12px; line-height: 1.625; -webkit-box-orient: vertical; -webkit-line-clamp: 2; cursor: text; user-select: text;">Mortal Kombat 11 rom for PS4, PKG &amp; DLC download for PS4 Console</p>
+            <div style="position: absolute;bottom: 16px;display: flex; align-items: center; gap: 6px;">
+                <a class="card-link" href="https://romsfun.com/roms/playstation-4/mortal-kombat-11.html" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; color: rgba(0, 229, 255, 0.8); font-size: 12px; text-decoration: none; transition: color 0.2s ease, text-decoration-color 0.2s ease; cursor: text; user-select: text;">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0;">
+                        <path d="M15 3h6v6"></path>
+                        <path d="M10 14 21 3"></path>
+                        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path>
+                    </svg>
+                    <span style="max-width: 20rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">romsfun.com</span>
+                </a>
+            </div>
+        </div>
+    </div>
+</body>
+</html>

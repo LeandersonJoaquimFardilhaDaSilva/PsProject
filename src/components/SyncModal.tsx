@@ -15,6 +15,7 @@ import {
 import { QRCodeSVG } from 'qrcode.react';
 import { Capacitor } from '@capacitor/core';
 import { BarcodeScanner } from '@capacitor-mlkit/barcode-scanning';
+import { PendulumLoader } from '@/components/PendulumLoader';
 import type { SyncServerInfo } from '@/electron';
 import {
   loadSyncConfig,
@@ -205,7 +206,7 @@ export function SyncModal({
 
       onSyncComplete(merged);
       setSyncStatusMsg({
-        text: `Sincronização concluída! ${merged.flows.length} itens e ${merged.channels.length} canais ativos.`,
+        text: `Sincronização concluída! ${merged.flows.length} itens e ${merged.channels.length} pastas ativas.`,
         type: 'success',
       });
     } catch (err: any) {
@@ -237,7 +238,7 @@ export function SyncModal({
             </div>
             <div>
               <h2 className="text-base font-semibold text-white">Sincronização PC ↔ Celular</h2>
-              <p className="text-xs text-white/40">Sincronize seus canais e mensagens em duas vias</p>
+              <p className="text-xs text-white/40">Sincronize suas pastas e mensagens em duas vias</p>
             </div>
           </div>
 
@@ -294,7 +295,7 @@ export function SyncModal({
                   </div>
                 ) : (
                   <div className="flex h-52 w-52 items-center justify-center rounded-2xl border border-dashed border-white/20">
-                    <RefreshCw size={24} className="animate-spin text-white/40" />
+                    <PendulumLoader size={36} color="#ffffff" />
                   </div>
                 )}
 
@@ -415,7 +416,11 @@ export function SyncModal({
                     disabled={isSyncing}
                     className="flex flex-1 items-center justify-center gap-2 rounded-xl bg-[#00e5ff] px-4 py-2.5 text-xs font-semibold text-black transition hover:brightness-110 disabled:opacity-50"
                   >
-                    <RefreshCw size={14} className={isSyncing ? 'animate-spin' : ''} />
+                    {isSyncing ? (
+                      <PendulumLoader size={14} color="#000000" />
+                    ) : (
+                      <RefreshCw size={14} />
+                    )}
                     {isSyncing ? 'Sincronizando...' : 'Conectar e Sincronizar'}
                   </button>
 

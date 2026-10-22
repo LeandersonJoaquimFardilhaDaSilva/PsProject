@@ -1,8 +1,8 @@
-# Flow Desktop
+# Tove (Transfer, Organize, Visualize, Everywhere)
 
-Aplicativo desktop nativo desenvolvido com **Electron**, **React**, **TypeScript**, **Tailwind CSS** e **Vite**.
+Aplicativo multiplataforma (Desktop e Mobile) desenvolvido com **Electron**, **Capacitor**, **React**, **TypeScript**, **Tailwind CSS** e **Vite**.
 
-Organize seus links, textos e imagens em canais com armazenamento local, visualização rápida e barra de título integrada.
+Transfira, organize e visualize seus links, notas, fotos, vídeos e arquivos em canais com sincronização local P2P e alta performance.
 
 ---
 
@@ -29,7 +29,7 @@ npm run dev
 
 ## 📦 Como Gerar o Executável (.exe para Windows)
 
-Para gerar o instalador (NSIS) e a versão portátil (`.exe`) do Flow para Windows:
+Para gerar o instalador (NSIS) e a versão portátil (`.exe`) do Tove para Windows:
 ```bash
 npm run electron:build
 ```

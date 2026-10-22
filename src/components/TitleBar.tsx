@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Minus, Square, Copy, X, WifiOff, Search, QrCode, Menu, Settings } from 'lucide-react';
+import { Minus, Square, Copy, X, WifiOff, Search, QrCode, Menu, Settings, Lock } from 'lucide-react';
+import { Capacitor } from '@capacitor/core';
 import type { Channel } from '@/types';
 
 interface TitleBarProps {
@@ -9,6 +10,8 @@ interface TitleBarProps {
   onSearchChange: (value: string) => void;
   onOpenSync: () => void;
   syncConnected?: boolean;
+  isWebSocketActive?: boolean;
+  activeClientsCount?: number;
   onToggleSidebar?: () => void;
   onOpenSettings?: () => void;
 }
@@ -20,11 +23,14 @@ export function TitleBar({
   onSearchChange,
   onOpenSync,
   syncConnected,
+  isWebSocketActive,
+  activeClientsCount,
   onToggleSidebar,
   onOpenSettings,
 }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const isElectron = typeof window !== 'undefined' && Boolean(window.electronAPI?.isElectron);
+  const isNativeMobile = Capacitor.isNativePlatform();
 
   useEffect(() => {
     if (!window.electronAPI) return;
@@ -35,42 +41,47 @@ export function TitleBar({
 
   return (
     <div
-      className="flex select-none items-center justify-between border-b border-white/5 bg-[#0a0a0f] px-3 sm:px-4 py-2 sm:py-2.5 shrink-0"
+      className={`flex select-none items-center justify-between border-b border-white/5 bg-[#0a0a0f] px-3 sm:px-4 py-2 sm:py-2.5 shrink-0 ${
+        isNativeMobile ? 'pt-8 pb-3' : ''
+      }`}
       style={{ WebkitAppRegion: isElectron ? 'drag' : undefined } as React.CSSProperties}
     >
       <div className="flex items-center gap-2 sm:gap-3 min-w-0">
         {isElectron ? (
           <div
-            className="flex items-center gap-1.5"
+            className="flex items-center gap-1.5 pointer-events-none select-none"
             style={{ WebkitAppRegion: isElectron ? 'no-drag' : undefined } as React.CSSProperties}
+            aria-hidden="true"
           >
-            <button
-              onClick={() => window.electronAPI?.close()}
-              className="h-3 w-3 rounded-full bg-[#ff5f57] transition hover:brightness-110"
-              title="Fechar"
+            <div
+              className="h-3 w-3 rounded-full bg-[#ff5f57] opacity-80"
+              title="Enfeite"
             />
-            <button
-              onClick={() => window.electronAPI?.minimize()}
-              className="h-3 w-3 rounded-full bg-[#febc2e] transition hover:brightness-110"
-              title="Minimizar"
+            <div
+              className="h-3 w-3 rounded-full bg-[#febc2e] opacity-80"
+              title="Enfeite"
             />
-            <button
-              onClick={() => window.electronAPI?.maximize()}
-              className="h-3 w-3 rounded-full bg-[#28c840] transition hover:brightness-110"
-              title={isMaximized ? 'Restaurar' : 'Maximizar'}
+            <div
+              className="h-3 w-3 rounded-full bg-[#28c840] opacity-80"
+              title="Enfeite"
             />
           </div>
         ) : (
           <button
             onClick={onToggleSidebar}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-white/60 hover:bg-white/10 hover:text-white md:hidden shrink-0"
-            title="Abrir canais"
+            title="Abrir pastas"
           >
             <Menu size={16} />
           </button>
         )}
-        <span className="truncate text-xs font-medium text-white/60">
-          Flow {channel && `· ${channel.name}`}
+        <span className="flex items-center gap-1.5 truncate text-xs font-medium text-white/60">
+          {channel?.isPrivate && (
+            <span title="Pasta privada" className="inline-flex items-center shrink-0">
+              <Lock size={12} className="text-[#ff3e6c]" />
+            </span>
+          )}
+          Tove {channel && `· ${channel.name}`}
         </span>
       </div>
 
@@ -88,37 +99,59 @@ export function TitleBar({
           />
         </div>
 
-        <div className="hidden sm:flex items-center gap-1.5 rounded-full border border-[#661e1e65]/20 bg-[#661e1e65]/10 px-2.5 py-1" title="Modo offline — dados salvos neste dispositivo">
-          <WifiOff size={12} className="text-[#d40000]" />
-          <span className="text-xs font-medium text-[#b40000]">Offline</span>
-        </div>
-
+        {/* Botão Unificado: Status de Conexão + QR Code (abre o modal de pareamento) */}
         <button
           onClick={onOpenSync}
-          className={`flex items-center gap-1 rounded-full border px-2 sm:px-2.5 py-1 text-xs font-medium transition ${
+          className={`flex items-center gap-1.5 rounded-full border px-2 sm:px-2.5 py-1 text-xs font-medium transition ${
             syncConnected
               ? 'border-[#26de81]/30 bg-[#26de81]/15 text-[#26de81] hover:bg-[#26de81]/25'
-              : 'border-[#00e5ff]/30 bg-[#00e5ff]/10 text-[#00e5ff] hover:bg-[#00e5ff]/20'
+              : 'border-white/10 bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
           }`}
-          title="Sincronização bidirecional PC ↔ Celular via QR Code"
+          title={
+            isWebSocketActive
+              ? isElectron
+                ? activeClientsCount && activeClientsCount > 0
+                  ? `Conectado em tempo real (${activeClientsCount} aparelho${activeClientsCount > 1 ? 's' : ''}). Clique para ver QR Code`
+                  : 'Servidor ativo na rede local. Clique para ver QR Code'
+                : 'Conectado em tempo real com o PC. Clique para ver detalhes'
+              : 'Modo offline. Clique para conectar via QR Code'
+          }
         >
-          <QrCode size={12} />
-          <span className="hidden xs:inline">{isElectron ? 'Celular' : 'Sync'}</span>
+          {isWebSocketActive ? (
+            <span className="relative flex h-2 w-2 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#26de81] opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-2 w-2 bg-[#26de81]"></span>
+            </span>
+          ) : (
+            <WifiOff size={12} className="text-[#ff5f57] shrink-0" />
+          )}
+          <QrCode size={12} className="shrink-0" />
+          <span className="hidden xs:inline">
+            {isElectron
+              ? activeClientsCount && activeClientsCount > 0
+                ? `Celular (${activeClientsCount})`
+                : 'Celular'
+              : syncConnected
+              ? 'Sync'
+              : 'Conectar'}
+          </span>
         </button>
 
         <button
           onClick={onOpenSettings}
           className="flex items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2 sm:px-2.5 py-1 text-xs font-medium text-white/70 transition hover:bg-white/10 hover:text-white"
-          title="Configurações e opções de garimpo de dados"
+          title="Configurações e opções do aplicativo"
         >
           <Settings size={12} />
           <span className="hidden sm:inline">Config</span>
         </button>
 
+        {/* Botão Limpar visível para todos os usuários (incluindo mobile) */}
         {channel && (
           <button
             onClick={onClearChannel}
-            className="hidden sm:block rounded-lg px-2 py-1 text-xs text-white/40 transition hover:bg-red-500/10 hover:text-red-400"
+            className="rounded-lg px-2 py-1 text-xs text-white/40 transition hover:bg-red-500/10 hover:text-red-400"
+            title="Limpar mensagens não fixadas desta pasta"
           >
             Limpar
           </button>
